@@ -18,7 +18,6 @@ export function AuthProvider({ children }) {
   }
 
   useEffect(() => {
-    // Hydrate session on load
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session)
       if (session?.user) loadProfile(session.user.id)
@@ -41,16 +40,16 @@ export function AuthProvider({ children }) {
   }, [])
 
   async function signInWithMicrosoft() {
-    const redirectBase =
-      window.location.hostname === 'localhost'
-        ? `http://localhost:${window.location.port || 5173}`
-        : 'https://pyramidapp.netlify.app'  // → swap to app.pyramidny.com after DNS
+    // Dynamically build redirectTo from the current origin so that
+    // app.pyramidny.com stays on app.pyramidny.com after login,
+    // and pyramidapp.netlify.app stays on pyramidapp.netlify.app.
+    const redirectBase = window.location.origin  // e.g. https://app.pyramidny.com
 
     const { error } = await supabase.auth.signInWithOAuth({
       provider: 'azure',
       options: {
         scopes: 'email profile openid',
-        redirectTo: `${redirectBase}/auth/callback`,  // ← dedicated callback route
+        redirectTo: `${redirectBase}/auth/callback`,
       },
     })
     if (error) throw error
