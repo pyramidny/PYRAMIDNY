@@ -4,6 +4,10 @@ import { useNavigate } from 'react-router-dom'
 
 const AuthContext = createContext(null)
 
+// Key stored in sessionStorage so it survives the Microsoft → app redirect
+// but is cleared once we've consumed it.
+const OAUTH_PENDING_KEY = 'pyramid_oauth_pending'
+
 export function AuthProvider({ children }) {
   const [session, setSession] = useState(undefined)
   const [profile, setProfile] = useState(null)
@@ -20,12 +24,11 @@ export function AuthProvider({ children }) {
   }
 
   useEffect(() => {
-    // ✅ Capture ONCE at mount — before Supabase strips ?code= from the URL.
-    // Checking window.location inside the event handler is too late; the URL
-    // is already clean by the time SIGNED_IN fires.
-    const isCallback = window.location.search.includes('code=')
+    // ✅ Check sessionStorage — immune to Supabase stripping ?code= at module
+    // load time (which happens before any React effect can read window.location).
+    const isOAuthReturn = sessionStorage.getItem(OAUTH_PENDING_KEY) === '1'
 
-    if (!isCallback) {
+    if (!isOAuthReturn) {
       // Normal page load — hydrate from existing session immediately
       supabase.auth.getSession().then(({ data: { session } }) => {
         setSession(session)
@@ -33,7 +36,7 @@ export function AuthProvider({ children }) {
         setLoading(false)
       })
     }
-    // If it IS a callback, stay in loading state until SIGNED_IN fires below.
+    // If it IS an OAuth return, stay in loading state until SIGNED_IN fires below.
     // This prevents a flash of the login screen while the code is being exchanged.
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
@@ -43,9 +46,9 @@ export function AuthProvider({ children }) {
         if (session?.user) {
           await loadProfile(session.user.id)
 
-          // isCallback is from the closure above — still accurate even though
-          // Supabase has already cleaned ?code= from the URL by now.
-          if (isCallback && (event === 'SIGNED_IN' || event === 'INITIAL_SESSION')) {
+          if (isOAuthReturn) {
+            // Consume the flag — don't redirect again on subsequent events
+            sessionStorage.removeItem(OAUTH_PENDING_KEY)
             setLoading(false)
             navigate('/dashboard', { replace: true })
             return
@@ -53,9 +56,8 @@ export function AuthProvider({ children }) {
         } else {
           setProfile(null)
 
-          // INITIAL_SESSION can fire with null while code exchange is in flight.
-          // Keep the spinner up — don't flash the login page.
-          if (isCallback) return
+          // INITIAL_SESSION fires null before exchange completes — keep spinner up
+          if (isOAuthReturn) return
         }
 
         setLoading(false)
@@ -66,12 +68,13 @@ export function AuthProvider({ children }) {
   }, [navigate])
 
   async function signInWithMicrosoft() {
-    // While app.pyramidny.com DNS is pending, keep pyramidapp.netlify.app as
-    // the registered redirect. Swap this once DNS + Azure redirect URI are live.
+    // ✅ Set the flag BEFORE redirecting to Microsoft — it survives the round trip
+    sessionStorage.setItem(OAUTH_PENDING_KEY, '1')
+
     const redirectBase =
       window.location.hostname === 'localhost'
         ? `http://localhost:${window.location.port || 5173}`
-        : 'https://pyramidapp.netlify.app'  // → swap to 'https://app.pyramidny.com' after DNS
+        : 'https://pyramidapp.netlify.app'  // → swap to app.pyramidny.com after DNS + Netlify domain confirmed
 
     const { error } = await supabase.auth.signInWithOAuth({
       provider: 'azure',
@@ -80,10 +83,16 @@ export function AuthProvider({ children }) {
         redirectTo: `${redirectBase}/`,
       },
     })
-    if (error) throw error
+
+    if (error) {
+      // Clean up flag if we never actually redirected
+      sessionStorage.removeItem(OAUTH_PENDING_KEY)
+      throw error
+    }
   }
 
   async function signOut() {
+    sessionStorage.removeItem(OAUTH_PENDING_KEY)
     await supabase.auth.signOut()
   }
 
