@@ -1,30 +1,42 @@
-import { supabase } from '@/lib/supabase'
 import { useEffect, useState } from 'react'
 
+const STORAGE_KEY = 'sb-izjaxmcdlsdkdliqjlei-auth-token'
+
+function getStoredSession() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY)
+    if (!raw) return null
+    const parsed = JSON.parse(raw)
+    return parsed?.access_token ? parsed : null
+  } catch {
+    return null
+  }
+}
+
 export function AuthCallback() {
-  const [status, setStatus] = useState('Waiting for session...')
+  const [status, setStatus] = useState('Checking localStorage...')
 
   useEffect(() => {
     let attempts = 0
 
-    const poll = setInterval(async () => {
+    const poll = setInterval(() => {
       attempts++
-      const { data: { session }, error } = await supabase.auth.getSession()
-
-      const msg = `Attempt ${attempts}: session=${!!session} error=${error?.message ?? 'none'}`
+      const session = getStoredSession()
+      const msg = `Attempt ${attempts}: token=${!!session}`
       console.log('[AuthCallback]', msg)
       setStatus(msg)
 
       if (session) {
         clearInterval(poll)
+        console.log('[AuthCallback] session found in localStorage, redirecting')
         window.location.replace('/dashboard')
         return
       }
 
-      if (attempts >= 20) {
+      if (attempts >= 30) {
         clearInterval(poll)
-        setStatus('Timed out — redirecting to login')
-        window.location.replace('/login')
+        setStatus('Timed out after 15s — check console')
+        console.log('[AuthCallback] timed out, localStorage keys:', Object.keys(localStorage))
       }
     }, 500)
 
@@ -53,7 +65,7 @@ export function AuthCallback() {
       }} />
       <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
       <p style={{ margin: 0, fontSize: '0.9rem' }}>Signing you in…</p>
-      <p style={{ margin: 0, fontSize: '0.7rem', opacity: 0.4, textAlign: 'center' }}>{status}</p>
+      <p style={{ margin: 0, fontSize: '0.7rem', opacity: 0.4 }}>{status}</p>
     </div>
   )
 }
