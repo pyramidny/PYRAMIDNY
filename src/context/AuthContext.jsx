@@ -33,7 +33,7 @@ export function AuthProvider({ children }) {
         setSession(session)
         if (session?.user) {
           await loadProfile(session.user.id)
-          if (_event === 'SIGNED_IN' && window.location.search.includes('code=')) {
+          if (window.location.search.includes('code=')) {
             window.location.replace('/dashboard')
             return
           }
