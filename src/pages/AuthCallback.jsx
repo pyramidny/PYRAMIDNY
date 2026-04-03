@@ -1,17 +1,39 @@
 import { supabase } from '@/lib/supabase'
-import { useEffect } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useEffect, useState } from 'react'
 
+// No useNavigate — we do a hard window.location redirect so React Router
+// and ProtectedRoute cannot interfere. Session is in localStorage so a
+// fresh page load at /dashboard picks it up cleanly.
 export function AuthCallback() {
-  const navigate = useNavigate()
+  const [status, setStatus] = useState('Waiting for session...')
 
   useEffect(() => {
-    // Now that the lock is a real mutex, getSession() will block until the
-    // PKCE code exchange completes and then return the hydrated session.
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      navigate(session ? '/dashboard' : '/login', { replace: true })
-    })
-  }, [navigate])
+    let attempts = 0
+
+    const poll = setInterval(async () => {
+      attempts++
+      const { data: { session }, error } = await supabase.auth.getSession()
+
+      const msg = `Attempt ${attempts}: session=${!!session} error=${error?.message ?? 'none'}`
+      console.log('[AuthCallback]', msg)
+      setStatus(msg)
+
+      if (session) {
+        clearInterval(poll)
+        // Hard redirect — bypasses React Router entirely
+        window.location.replace('/dashboard')
+        return
+      }
+
+      if (attempts >= 20) {
+        clearInterval(poll)
+        setStatus('Timed out — redirecting to login')
+        window.location.replace('/login')
+      }
+    }, 500)
+
+    return () => clearInterval(poll)
+  }, [])
 
   return (
     <div style={{
@@ -35,6 +57,7 @@ export function AuthCallback() {
       }} />
       <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
       <p style={{ margin: 0, fontSize: '0.9rem' }}>Signing you in…</p>
+      <p style={{ margin: 0, fontSize: '0.7rem', opacity: 0.4, maxWidth: '300px', textAlign: 'center' }}>{status}</p>
     </div>
   )
 }
