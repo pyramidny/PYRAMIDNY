@@ -1,0 +1,108 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  *, *::before, *::after { box-sizing: border-box; }
+
+  html { -webkit-tap-highlight-color: transparent; }
+
+  body {
+    @apply font-sans text-ink-100 bg-ink-950;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  /* Custom scrollbar — dark theme */
+  ::-webkit-scrollbar { width: 6px; height: 6px; }
+  ::-webkit-scrollbar-track { @apply bg-transparent; }
+  ::-webkit-scrollbar-thumb { @apply bg-ink-700 rounded-full; }
+  ::-webkit-scrollbar-thumb:hover { @apply bg-ink-600; }
+}
+
+@layer components {
+  /* Project number badge — monospace, pill */
+  .project-badge {
+    @apply font-mono text-xs font-medium px-2 py-0.5 rounded tracking-wide;
+  }
+  .project-badge-regular {
+    @apply project-badge bg-regular/15 text-regular border border-regular/25;
+  }
+  .project-badge-ira {
+    @apply project-badge bg-ira/15 text-ira border border-ira/25;
+  }
+
+  /* Status pill */
+  .status-pill {
+    @apply inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1 rounded-full;
+  }
+
+  /* Sidebar nav item */
+  .nav-item {
+    @apply flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium
+           text-ink-400 hover:text-ink-100 hover:bg-white/5
+           transition-all duration-150 cursor-pointer select-none;
+  }
+  .nav-item-active {
+    @apply text-white bg-white/10;
+  }
+  .nav-item-active .nav-icon {
+    @apply text-pyramid-500;
+  }
+
+  /* Card */
+  .card {
+    @apply bg-white rounded-xl shadow-card border border-ink-200;
+  }
+  .card-dark {
+    @apply bg-ink-900 rounded-xl border border-white/8;
+  }
+
+  /* Input */
+  .input {
+    @apply w-full px-3 py-2 rounded-lg border border-ink-300 bg-white
+           text-ink-900 text-sm placeholder-ink-400
+           focus:outline-none focus:ring-2 focus:ring-pyramid-500/40 focus:border-pyramid-500
+           transition-all duration-150;
+  }
+
+  /* Button variants */
+  .btn-primary {
+    @apply inline-flex items-center gap-2 px-4 py-2.5 rounded-lg
+           bg-pyramid-600 hover:bg-pyramid-500 text-white
+           text-sm font-semibold tracking-wide
+           transition-all duration-150 active:scale-95 shadow-sm;
+  }
+  .btn-secondary {
+    @apply inline-flex items-center gap-2 px-4 py-2.5 rounded-lg
+           bg-ink-100 hover:bg-ink-200 text-ink-800
+           text-sm font-semibold
+           transition-all duration-150 active:scale-95;
+  }
+  .btn-ghost {
+    @apply inline-flex items-center gap-2 px-3 py-2 rounded-lg
+           text-ink-400 hover:text-ink-100 hover:bg-white/5
+           text-sm font-medium transition-all duration-150;
+  }
+}
+
+@layer utilities {
+  .border-white\/8 { border-color: rgba(255,255,255,0.08); }
+  .border-white\/6 { border-color: rgba(255,255,255,0.06); }
+  .bg-white\/3  { background-color: rgba(255,255,255,0.03); }
+
+  /* Safe area insets for PWA on iOS */
+  .pb-safe { padding-bottom: env(safe-area-inset-bottom, 0px); }
+  .pt-safe { padding-top:    env(safe-area-inset-top, 0px); }
+}
+
+/* Page transition */
+.page-enter {
+  opacity: 0;
+  transform: translateY(6px);
+}
+.page-enter-active {
+  opacity: 1;
+  transform: translateY(0);
+  transition: opacity 200ms ease, transform 200ms ease;
+}
