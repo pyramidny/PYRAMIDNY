@@ -1,9 +1,6 @@
 import { supabase } from '@/lib/supabase'
 import { useEffect, useState } from 'react'
 
-// No useNavigate — we do a hard window.location redirect so React Router
-// and ProtectedRoute cannot interfere. Session is in localStorage so a
-// fresh page load at /dashboard picks it up cleanly.
 export function AuthCallback() {
   const [status, setStatus] = useState('Waiting for session...')
 
@@ -20,7 +17,6 @@ export function AuthCallback() {
 
       if (session) {
         clearInterval(poll)
-        // Hard redirect — bypasses React Router entirely
         window.location.replace('/dashboard')
         return
       }
@@ -57,7 +53,7 @@ export function AuthCallback() {
       }} />
       <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
       <p style={{ margin: 0, fontSize: '0.9rem' }}>Signing you in…</p>
-      <p style={{ margin: 0, fontSize: '0.7rem', opacity: 0.4, maxWidth: '300px', textAlign: 'center' }}>{status}</p>
+      <p style={{ margin: 0, fontSize: '0.7rem', opacity: 0.4, textAlign: 'center' }}>{status}</p>
     </div>
   )
 }

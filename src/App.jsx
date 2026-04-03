@@ -16,13 +16,24 @@ import { Navigate, Route, Routes } from 'react-router-dom'
 export default function App() {
   const { loading } = useAuth()
 
+  // ✅ Let the OAuth callback page mount immediately — before the loading
+  // gate — so it can poll for the session independently of AuthContext.
+  // Without this, App returns null while loading=true and AuthCallback
+  // never mounts, so the redirect never fires.
+  if (window.location.pathname === '/auth/callback') {
+    return (
+      <Routes>
+        <Route path="/auth/callback" element={<AuthCallback />} />
+      </Routes>
+    )
+  }
+
   if (loading) return null
 
   return (
     <Routes>
       {/* Public */}
-      <Route path="/login"         element={<Login />} />
-      <Route path="/auth/callback" element={<AuthCallback />} />
+      <Route path="/login" element={<Login />} />
 
       {/* Protected — all share the sidebar Layout */}
       <Route
