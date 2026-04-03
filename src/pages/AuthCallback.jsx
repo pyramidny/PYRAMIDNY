@@ -1,33 +1,25 @@
+import { supabase } from '@/lib/supabase'
 import { useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { supabase } from '@/lib/supabase'
 
 export function AuthCallback() {
   const navigate = useNavigate()
 
   useEffect(() => {
-    // Supabase automatically exchanges the ?code= param when this page mounts.
-    // We just wait for the SIGNED_IN event and then navigate normally.
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
-      if (event === 'SIGNED_IN' && session) {
-        subscription.unsubscribe()
+    // By the time this component mounts, App.jsx has already cleared its
+    // loading gate — meaning Supabase has finished exchanging the ?code=
+    // and SIGNED_IN has already fired. Listening for onAuthStateChange here
+    // would miss that event. Instead, just read the session directly.
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (session) {
         navigate('/dashboard', { replace: true })
+      } else {
+        // Exchange failed or timed out — send to login
+        navigate('/login', { replace: true })
       }
     })
-
-    // Safety net: if no event fires in 8 seconds, go to login
-    const timeout = setTimeout(() => {
-      subscription.unsubscribe()
-      navigate('/login', { replace: true })
-    }, 8000)
-
-    return () => {
-      subscription.unsubscribe()
-      clearTimeout(timeout)
-    }
   }, [navigate])
 
-  // Simple centered spinner — matches your dark blue shell
   return (
     <div style={{
       display: 'flex',
