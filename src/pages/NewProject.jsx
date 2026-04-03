@@ -168,12 +168,17 @@ export default function NewProject() {
     return errs
   }
 
+  
   // ── Submit ──────────────────────────────────────────────────────────────────
   const handleSubmit = async (e) => {
     e.preventDefault()
     const errs = validate()
     if (Object.keys(errs).length) { setErrors(errs); return }
 
+      const { data: { session } } = await supabase.auth.getSession()
+  console.log('session uid:', session?.user?.id)
+  console.log('session token:', session?.access_token?.slice(0, 20))
+  
     setSaving(true)
     setServerErr(null)
 
