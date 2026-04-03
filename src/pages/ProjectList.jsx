@@ -1,8 +1,8 @@
+import { useAuth } from '@/context/AuthContext'
+import { supabase } from '@/lib/supabase'
+import { Anchor, ChevronRight, HardHat, Plus, Search } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
-import { Search, Plus, HardHat, Anchor, ChevronRight, Filter } from 'lucide-react'
-import { supabase } from '@/lib/supabase'
-import { useAuth } from '@/context/AuthContext'
 
 const STATUSES = [
   'New Bid', 'Active Bid', 'No Bid', 'Bid Not Awarded',
@@ -83,10 +83,10 @@ export function ProjectList() {
             Projects
           </h1>
           {isPM && (
-            <button className="btn-primary">
+            <Link to="/projects/new" className="btn-primary">
               <Plus size={16} />
               New Project
-            </button>
+            </Link>
           )}
         </div>
 
