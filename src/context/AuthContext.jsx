@@ -4,11 +4,10 @@ import { createContext, useContext, useEffect, useState } from 'react'
 const AuthContext = createContext(null)
 
 export function AuthProvider({ children }) {
-  const [session, setSession]   = useState(undefined) // undefined = loading
+  const [session, setSession]   = useState(undefined)
   const [profile, setProfile]   = useState(null)
   const [loading, setLoading]   = useState(true)
 
-  // Load profile from the profiles table
   async function loadProfile(userId) {
     const { data, error } = await supabase
       .from('profiles')
@@ -19,14 +18,16 @@ export function AuthProvider({ children }) {
   }
 
   useEffect(() => {
-    // Get initial session
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setSession(session)
-      if (session?.user) loadProfile(session.user.id)
-      setLoading(false)
-    })
+    const hasCode = window.location.search.includes('code=')
 
-    // Listen for auth changes (login, logout, token refresh)
+    if (!hasCode) {
+      supabase.auth.getSession().then(({ data: { session } }) => {
+        setSession(session)
+        if (session?.user) loadProfile(session.user.id)
+        setLoading(false)
+      })
+    }
+
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (_event, session) => {
         setSession(session)
@@ -35,13 +36,13 @@ export function AuthProvider({ children }) {
         } else {
           setProfile(null)
         }
+        setLoading(false)
       }
     )
 
     return () => subscription.unsubscribe()
   }, [])
 
-  // Sign in with Azure AD via Supabase OAuth
   async function signInWithMicrosoft() {
     const { error } = await supabase.auth.signInWithOAuth({
       provider: 'azure',
@@ -57,12 +58,11 @@ export function AuthProvider({ children }) {
     await supabase.auth.signOut()
   }
 
-  // Role helpers
-  const isAdmin     = profile?.role === 'admin'
-  const isElevated  = ['admin', 'director_of_operations'].includes(profile?.role)
-  const isPM        = ['admin', 'director_of_operations', 'project_manager', 'assistant_pm']
-                        .includes(profile?.role)
-  const division    = profile?.division ?? null // null = both
+  const isAdmin    = profile?.role === 'admin'
+  const isElevated = ['admin', 'director_of_operations'].includes(profile?.role)
+  const isPM       = ['admin', 'director_of_operations', 'project_manager', 'assistant_pm']
+                       .includes(profile?.role)
+  const division   = profile?.division ?? null
 
   const value = {
     session,
