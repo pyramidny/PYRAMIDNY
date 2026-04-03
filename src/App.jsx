@@ -1,6 +1,7 @@
 import { Layout } from '@/components/Layout'
 import { ProtectedRoute } from '@/components/ProtectedRoute'
 import { useAuth } from '@/context/AuthContext'
+import { AuthCallback } from '@/pages/AuthCallback'
 import { Dashboard } from '@/pages/Dashboard'
 import { Login } from '@/pages/Login'
 import {
@@ -10,27 +11,18 @@ import {
   Team,
 } from '@/pages/Placeholders'
 import { ProjectList } from '@/pages/ProjectList'
-import { useEffect } from 'react'
-import { Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
+import { Navigate, Route, Routes } from 'react-router-dom'
 
 export default function App() {
-  const { session, loading } = useAuth()
-  const navigate = useNavigate()
-  const location = useLocation()
-
-  // Soft redirect after OAuth callback
-  useEffect(() => {
-    if (!loading && session && location.search.includes('code=')) {
-      navigate('/dashboard', { replace: true })
-    }
-  }, [session, loading, location])
+  const { loading } = useAuth()
 
   if (loading) return null
 
   return (
     <Routes>
       {/* Public */}
-      <Route path="/login" element={<Login />} />
+      <Route path="/login"         element={<Login />} />
+      <Route path="/auth/callback" element={<AuthCallback />} />
 
       {/* Protected — all share the sidebar Layout */}
       <Route
