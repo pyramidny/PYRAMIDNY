@@ -1,5 +1,5 @@
-import { createContext, useContext, useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
+import { createContext, useContext, useEffect, useState } from 'react'
 
 const AuthContext = createContext(null)
 
@@ -47,7 +47,7 @@ export function AuthProvider({ children }) {
       provider: 'azure',
       options: {
         scopes:     'email profile openid',
-        redirectTo: `${window.location.origin}/`,
+        redirectTo: 'https://pyramidapp.netlify.app/',
       },
     })
     if (error) throw error
