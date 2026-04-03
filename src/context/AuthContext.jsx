@@ -32,6 +32,9 @@ export function AuthProvider({ children }) {
         setSession(session)
         if (session?.user) {
           await loadProfile(session.user.id)
+          if (_event === 'SIGNED_IN') {
+         window.location.href = '/dashboard'
+      }
         } else {
           setProfile(null)
         }
