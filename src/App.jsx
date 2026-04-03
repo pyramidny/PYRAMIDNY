@@ -10,13 +10,21 @@ import {
   Team,
 } from '@/pages/Placeholders'
 import { ProjectList } from '@/pages/ProjectList'
-import { Navigate, Route, Routes } from 'react-router-dom'
+import { useEffect } from 'react'
+import { Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
 
 export default function App() {
   const { session, loading } = useAuth()
+  const navigate = useNavigate()
+  const location = useLocation()
 
-  // Blank screen while Supabase resolves the session (avoids flash to /login)
-  // v1.0.1
+  // Soft redirect after OAuth callback
+  useEffect(() => {
+    if (!loading && session && location.search.includes('code=')) {
+      navigate('/dashboard', { replace: true })
+    }
+  }, [session, loading, location])
+
   if (loading) return null
 
   return (
@@ -33,12 +41,12 @@ export default function App() {
         }
       >
         <Route index element={<Navigate to="/dashboard" replace />} />
-        <Route path="/dashboard"            element={<Dashboard />} />
-        <Route path="/projects"             element={<ProjectList />} />
-        <Route path="/projects/:id"         element={<ProjectDetail />} />
-        <Route path="/tasks"                element={<MyTasks />} />
-        <Route path="/team"                 element={<Team />} />
-        <Route path="/settings"             element={<Settings />} />
+        <Route path="/dashboard"    element={<Dashboard />} />
+        <Route path="/projects"     element={<ProjectList />} />
+        <Route path="/projects/:id" element={<ProjectDetail />} />
+        <Route path="/tasks"        element={<MyTasks />} />
+        <Route path="/team"         element={<Team />} />
+        <Route path="/settings"     element={<Settings />} />
       </Route>
 
       {/* Catch-all */}
