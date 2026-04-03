@@ -3,10 +3,10 @@
 // Writes to: projects table (Supabase)
 // Redirects to: /projects on success
 
+import { useAuth } from '@/context/AuthContext'
+import { supabase } from '@/lib/supabase'
 import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { useAuth } from '../context/AuthContext'
-import { supabase } from '../supabase'
 
 // ── Trade types for Pyramid's restoration scope ──────────────────────────────
 const TRADE_TYPES = [
