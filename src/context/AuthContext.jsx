@@ -20,10 +20,13 @@ export function AuthProvider({ children }) {
   }
 
   useEffect(() => {
+    // ✅ Capture ONCE at mount — before Supabase strips ?code= from the URL.
+    // Checking window.location inside the event handler is too late; the URL
+    // is already clean by the time SIGNED_IN fires.
     const isCallback = window.location.search.includes('code=')
 
-    // Normal page load (not an OAuth callback) — hydrate from existing session
     if (!isCallback) {
+      // Normal page load — hydrate from existing session immediately
       supabase.auth.getSession().then(({ data: { session } }) => {
         setSession(session)
         if (session?.user) loadProfile(session.user.id)
@@ -35,15 +38,14 @@ export function AuthProvider({ children }) {
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (event, session) => {
-        const onCallbackUrl = window.location.search.includes('code=')
-
         setSession(session)
 
         if (session?.user) {
           await loadProfile(session.user.id)
 
-          // Redirect after a successful OAuth code exchange
-          if (onCallbackUrl && event === 'SIGNED_IN') {
+          // isCallback is from the closure above — still accurate even though
+          // Supabase has already cleaned ?code= from the URL by now.
+          if (isCallback && (event === 'SIGNED_IN' || event === 'INITIAL_SESSION')) {
             setLoading(false)
             navigate('/dashboard', { replace: true })
             return
@@ -51,9 +53,9 @@ export function AuthProvider({ children }) {
         } else {
           setProfile(null)
 
-          // INITIAL_SESSION fires null before code exchange completes —
-          // keep the loading spinner up so there's no login-page flash.
-          if (onCallbackUrl) return
+          // INITIAL_SESSION can fire with null while code exchange is in flight.
+          // Keep the spinner up — don't flash the login page.
+          if (isCallback) return
         }
 
         setLoading(false)
@@ -64,11 +66,12 @@ export function AuthProvider({ children }) {
   }, [navigate])
 
   async function signInWithMicrosoft() {
-    // Dynamically pick the redirect base so local dev still works
+    // While app.pyramidny.com DNS is pending, keep pyramidapp.netlify.app as
+    // the registered redirect. Swap this once DNS + Azure redirect URI are live.
     const redirectBase =
       window.location.hostname === 'localhost'
         ? `http://localhost:${window.location.port || 5173}`
-        : 'https://app.pyramidny.com'
+        : 'https://pyramidapp.netlify.app'  // → swap to 'https://app.pyramidny.com' after DNS
 
     const { error } = await supabase.auth.signInWithOAuth({
       provider: 'azure',
