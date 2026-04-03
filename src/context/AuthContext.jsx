@@ -4,9 +4,9 @@ import { createContext, useContext, useEffect, useState } from 'react'
 const AuthContext = createContext(null)
 
 export function AuthProvider({ children }) {
-  const [session, setSession]   = useState(undefined)
-  const [profile, setProfile]   = useState(null)
-  const [loading, setLoading]   = useState(true)
+  const [session, setSession] = useState(undefined)
+  const [profile, setProfile] = useState(null)
+  const [loading, setLoading] = useState(true)
 
   async function loadProfile(userId) {
     const { data, error } = await supabase
@@ -33,6 +33,10 @@ export function AuthProvider({ children }) {
         setSession(session)
         if (session?.user) {
           await loadProfile(session.user.id)
+          if (_event === 'SIGNED_IN' && window.location.search.includes('code=')) {
+            window.location.replace('/dashboard')
+            return
+          }
         } else {
           setProfile(null)
         }
@@ -47,7 +51,7 @@ export function AuthProvider({ children }) {
     const { error } = await supabase.auth.signInWithOAuth({
       provider: 'azure',
       options: {
-        scopes:     'email profile openid',
+        scopes: 'email profile openid',
         redirectTo: 'https://pyramidapp.netlify.app/',
       },
     })
