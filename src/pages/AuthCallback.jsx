@@ -6,17 +6,10 @@ export function AuthCallback() {
   const navigate = useNavigate()
 
   useEffect(() => {
-    // By the time this component mounts, App.jsx has already cleared its
-    // loading gate — meaning Supabase has finished exchanging the ?code=
-    // and SIGNED_IN has already fired. Listening for onAuthStateChange here
-    // would miss that event. Instead, just read the session directly.
+    // Now that the lock is a real mutex, getSession() will block until the
+    // PKCE code exchange completes and then return the hydrated session.
     supabase.auth.getSession().then(({ data: { session } }) => {
-      if (session) {
-        navigate('/dashboard', { replace: true })
-      } else {
-        // Exchange failed or timed out — send to login
-        navigate('/login', { replace: true })
-      }
+      navigate(session ? '/dashboard' : '/login', { replace: true })
     })
   }, [navigate])
 
