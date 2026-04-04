@@ -1,3 +1,4 @@
+import { supabase } from '@/lib/supabase'
 import { useEffect, useState } from 'react'
 
 const STORAGE_KEY = 'sb-izjaxmcdlsdkdliqjlei-auth-token'
@@ -19,7 +20,7 @@ export function AuthCallback() {
   useEffect(() => {
     let attempts = 0
 
-    const poll = setInterval(() => {
+    const poll = setInterval(async () => {
       attempts++
       const session = getStoredSession()
       const msg = `Attempt ${attempts}: token=${!!session}`
@@ -28,7 +29,24 @@ export function AuthCallback() {
 
       if (session) {
         clearInterval(poll)
-        console.log('[AuthCallback] session found in localStorage, redirecting')
+        console.log('[AuthCallback] session found, injecting into Supabase client...')
+
+        // ── Inject the Azure AD token into the Supabase client ──────────────
+        // Without this, the client falls back to the anon key for all requests
+        // and every `to authenticated` RLS policy silently rejects them.
+        const { error } = await supabase.auth.setSession({
+          access_token:  session.access_token,
+          refresh_token: session.refresh_token ?? session.access_token,
+        })
+
+        if (error) {
+          console.warn('[AuthCallback] setSession error (non-fatal):', error.message)
+          // Still redirect — the user is authenticated via Azure AD even if
+          // Supabase setSession has a minor hiccup
+        } else {
+          console.log('[AuthCallback] Supabase client session injected successfully')
+        }
+
         window.location.replace('/dashboard')
         return
       }
