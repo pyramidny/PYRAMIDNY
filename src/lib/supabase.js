@@ -14,5 +14,6 @@ export const supabase = createClient(supabaseUrl, supabaseAnon, {
     detectSessionInUrl: true,
     flowType:           'pkce',
     lock:               async (name, timeout, fn) => fn(),
+    storageKey:         'sb-izjaxmcdlsdkdliqjlei-auth-token',  // ← add this
   },
 })
