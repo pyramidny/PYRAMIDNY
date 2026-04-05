@@ -1,14 +1,13 @@
 // src/pages/NewProject.jsx
 // Route: /projects/new
 // Writes to: projects table (Supabase)
-// Redirects to: /projects/:id on success
+// Redirects to: /projects on success
 
 import { useAuth } from '@/context/AuthContext'
 import { supabase } from '@/lib/supabase'
 import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 
-// ── Scope types pulled from spreadsheet data ──────────────────────────────────
 const SCOPE_TYPES = [
   'Facade Repairs',
   'Facade Restoration',
@@ -41,7 +40,6 @@ const STATUSES = [
   { value: 'Job Closed',      label: 'Job Closed' },
 ]
 
-// ── Empty form state — mirrors projects table columns exactly ─────────────────
 const EMPTY = {
   division:               'regular',
   status:                 'New Bid',
@@ -53,7 +51,6 @@ const EMPTY = {
   notes:                  '',
 }
 
-// ── Input primitives ──────────────────────────────────────────────────────────
 function Label({ children, required }) {
   return (
     <label className="block text-xs font-semibold tracking-widest uppercase text-stone-400 mb-1.5">
@@ -140,7 +137,6 @@ function Section({ number, title, children }) {
   )
 }
 
-// ── Main component ────────────────────────────────────────────────────────────
 export default function NewProject() {
   const navigate = useNavigate()
   const { user } = useAuth()
@@ -158,7 +154,6 @@ export default function NewProject() {
     setForm((prev) => ({ ...prev, bid_amount: raw }))
   }
 
-  // ── Validation ──────────────────────────────────────────────────────────────
   const validate = () => {
     const errs = {}
     if (!form.project_address.trim()) errs.project_address = 'Project address is required.'
@@ -168,8 +163,6 @@ export default function NewProject() {
     return errs
   }
 
-  
-  // ── Submit ──────────────────────────────────────────────────────────────────
   const handleSubmit = async (e) => {
     e.preventDefault()
     const errs = validate()
@@ -190,11 +183,12 @@ export default function NewProject() {
       created_by:             user?.id ?? null,
     }
 
-    const { data, error } = await supabase
+    // ── Insert without .select() to avoid the SELECT policy firing ──────────
+    // can_access_project() runs on SELECT and may reject newly created rows.
+    // We navigate to /projects on success and let the list reload from there.
+    const { error } = await supabase
       .from('projects')
       .insert([payload])
-      .select('id')
-      .single()
 
     setSaving(false)
 
@@ -204,10 +198,9 @@ export default function NewProject() {
       return
     }
 
-    navigate(data?.id ? `/projects/${data.id}` : '/projects')
+    navigate('/projects')
   }
 
-  // ── Render ──────────────────────────────────────────────────────────────────
   return (
     <div className="min-h-screen bg-stone-950 text-stone-100">
 
@@ -230,7 +223,6 @@ export default function NewProject() {
             </div>
           </div>
 
-          {/* Division toggle + Status selector */}
           <div className="flex items-center gap-2 flex-shrink-0">
             <div className="flex rounded-sm overflow-hidden border border-stone-700 text-xs font-medium">
               {['regular', 'ira'].map((div) => (
@@ -273,7 +265,6 @@ export default function NewProject() {
       <div className="max-w-3xl mx-auto px-6 py-10">
         <form onSubmit={handleSubmit} noValidate>
 
-          {/* Project address — top-level, most important field */}
           <div className="mb-10">
             <Label required>Project Address</Label>
             <Input
@@ -289,7 +280,6 @@ export default function NewProject() {
 
           <div className="space-y-10">
 
-            {/* ── Section 1: Scope ── */}
             <Section number="1" title="Scope">
               <div>
                 <Label required>Scope Type</Label>
@@ -322,7 +312,6 @@ export default function NewProject() {
               </div>
             </Section>
 
-            {/* ── Section 2: Contacts ── */}
             <Section number="2" title="Contacts">
               <div>
                 <Label>Property Manager / Owner</Label>
@@ -344,7 +333,6 @@ export default function NewProject() {
               </div>
             </Section>
 
-            {/* ── Section 3: Bid Amount ── */}
             <Section number="3" title="Bid Amount">
               <div className="max-w-xs">
                 <Label>Bid Amount</Label>
@@ -369,14 +357,12 @@ export default function NewProject() {
 
           </div>
 
-          {/* ── Server error ── */}
           {serverErr && (
             <div className="mt-8 p-4 rounded-sm bg-red-950 border border-red-800 text-red-300 text-sm">
               <strong className="font-semibold">Save failed:</strong> {serverErr}
             </div>
           )}
 
-          {/* ── Actions ── */}
           <div className="mt-10 pt-8 border-t border-stone-800 flex items-center justify-between gap-4">
             <Link
               to="/projects"
