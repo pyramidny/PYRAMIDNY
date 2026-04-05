@@ -7,10 +7,10 @@ import { Login } from '@/pages/Login'
 import NewProject from '@/pages/NewProject'; // ← ADD THIS
 import {
   MyTasks,
-  ProjectDetail,
   Settings,
   Team,
 } from '@/pages/Placeholders'
+import ProjectDetail from '@/pages/ProjectDetail'
 import { ProjectList } from '@/pages/ProjectList'
 import { Navigate, Route, Routes } from 'react-router-dom'
 
