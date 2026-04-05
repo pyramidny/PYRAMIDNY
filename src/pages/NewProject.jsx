@@ -1,7 +1,7 @@
 // src/pages/NewProject.jsx
 // Route: /projects/new
-// Writes to: projects table (Supabase)
-// Redirects to: /projects on success
+// Writes via: Supabase Edge Function (create-project)
+// The Edge Function uses the service_role key to bypass RLS.
 
 import { useAuth } from '@/context/AuthContext'
 import { supabase } from '@/lib/supabase'
@@ -171,34 +171,40 @@ export default function NewProject() {
     setSaving(true)
     setServerErr(null)
 
-    const payload = {
-      division:               form.division,
-      status:                 form.status,
-      project_address:        form.project_address.trim(),
-      scope_type:             form.scope_type || null,
-      property_manager_owner: form.property_manager_owner.trim() || null,
-      architect_engineer:     form.architect_engineer.trim() || null,
-      bid_amount:             form.bid_amount ? Number(form.bid_amount) : null,
-      notes:                  form.notes.trim() || null,
-      created_by:             user?.id ?? null,
+    try {
+      // ── Call the Edge Function with the user's JWT ─────────────────────
+      const { data: { session } } = await supabase.auth.getSession()
+      const token = session?.access_token
+
+      const { data, error } = await supabase.functions.invoke('create-project', {
+        body: {
+          division:               form.division,
+          status:                 form.status,
+          project_address:        form.project_address.trim(),
+          scope_type:             form.scope_type || null,
+          property_manager_owner: form.property_manager_owner.trim() || null,
+          architect_engineer:     form.architect_engineer.trim() || null,
+          bid_amount:             form.bid_amount ? Number(form.bid_amount) : null,
+          notes:                  form.notes.trim() || null,
+        },
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      })
+
+      if (error) {
+        console.error('Edge Function error:', error)
+        setServerErr(error.message ?? 'Save failed')
+        return
+      }
+
+      // Navigate to the new project detail or fall back to list
+      navigate(data?.id ? `/projects/${data.id}` : '/projects')
+
+    } catch (err) {
+      console.error('Unexpected error:', err)
+      setServerErr('An unexpected error occurred. Please try again.')
+    } finally {
+      setSaving(false)
     }
-
-    // ── Insert without .select() to avoid the SELECT policy firing ──────────
-    // can_access_project() runs on SELECT and may reject newly created rows.
-    // We navigate to /projects on success and let the list reload from there.
-    const { error } = await supabase
-      .from('projects')
-      .insert([payload])
-
-    setSaving(false)
-
-    if (error) {
-      console.error('Supabase insert error:', error)
-      setServerErr(error.message)
-      return
-    }
-
-    navigate('/projects')
   }
 
   return (
