@@ -10,24 +10,26 @@ import {
   TrendingUp
 } from 'lucide-react'
 import { useEffect, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useLocation } from 'react-router-dom'
 
 export function Dashboard() {
   const { profile, division } = useAuth()
+  const location              = useLocation()
   const [stats, setStats]     = useState(null)
   const [tasks, setTasks]     = useState([])
   const [loading, setLoading] = useState(true)
 
   const firstName = profile?.display_name ?? profile?.full_name?.split(' ')[0] ?? 'there'
-  const hour = new Date().getHours()
-  const greeting = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening'
+  const hour      = new Date().getHours()
+  const greeting  = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening'
 
-  useEffect(() => { fetchData() }, [division])
+  // Re-fetch every time we navigate to this page (location.key changes on each visit)
+  useEffect(() => { fetchData() }, [division, location.key])
 
   async function fetchData() {
     setLoading(true)
     try {
-      // ── Project counts by status ───────────────────────────────────────
+      // ── Project counts ─────────────────────────────────────────────────
       let query = supabase.from('projects').select('status, division')
       if (division) query = query.eq('division', division)
       const { data: projects, error: projectsError } = await query
@@ -45,9 +47,9 @@ export function Dashboard() {
         })
       }
 
-      // ── My open tasks — safe user id lookup ───────────────────────────
-      // supabase.auth.getUser() returns null for Azure AD tokens.
-      // Fall back to the profile id from AuthContext instead.
+      // ── My open tasks ──────────────────────────────────────────────────
+      // Use profile.id from AuthContext — supabase.auth.getUser() returns
+      // null for Azure AD tokens and would break the query.
       const userId = profile?.id ?? null
 
       if (userId) {
@@ -76,7 +78,7 @@ export function Dashboard() {
   return (
     <div className="p-6 max-w-6xl mx-auto space-y-6">
 
-      {/* ── Header ───────────────────────────────────── */}
+      {/* ── Header ── */}
       <div className="flex items-start justify-between">
         <div>
           <h1 className="text-2xl font-condensed font-bold text-ink-900 tracking-wide">
@@ -100,7 +102,7 @@ export function Dashboard() {
         )}
       </div>
 
-      {/* ── Stat Cards ───────────────────────────────── */}
+      {/* ── Stat Cards ── */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         <StatCard
           label="Active Bids"
@@ -136,7 +138,7 @@ export function Dashboard() {
         />
       </div>
 
-      {/* ── Two-column grid ──────────────────────────── */}
+      {/* ── Two-column grid ── */}
       <div className="grid lg:grid-cols-2 gap-6">
 
         {/* My Tasks */}
@@ -163,10 +165,8 @@ export function Dashboard() {
         {/* Division breakdown */}
         <div className="card p-5 space-y-4">
           <h2 className="font-semibold text-ink-900 text-sm">Project Mix</h2>
-
           <div className="space-y-3">
             <DivisionBar
-              division="regular"
               label="Regular Construction"
               prefix="P-"
               count={stats?.regular ?? 0}
@@ -177,7 +177,6 @@ export function Dashboard() {
               loading={loading}
             />
             <DivisionBar
-              division="ira"
               label="IRA / Rope Access"
               prefix="A-"
               count={stats?.ira ?? 0}
@@ -188,7 +187,6 @@ export function Dashboard() {
               loading={loading}
             />
           </div>
-
           <div className="pt-2 border-t border-ink-100">
             <Link to="/projects" className="btn-primary w-full justify-center text-sm">
               View All Projects
@@ -225,7 +223,7 @@ function TaskRow({ task }) {
   return (
     <div className="flex items-start gap-3 px-5 py-3.5 hover:bg-ink-50 transition-colors">
       <div className={`mt-0.5 flex-shrink-0 w-2 h-2 rounded-full
-        ${task.status === 'overdue' || isOverdue ? 'bg-red-500' : 'bg-pyramid-500'}`}
+        ${isOverdue ? 'bg-red-500' : 'bg-pyramid-500'}`}
       />
       <div className="flex-1 min-w-0">
         <div className="text-sm font-medium text-ink-800 truncate">{task.task_name}</div>

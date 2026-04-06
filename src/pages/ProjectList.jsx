@@ -2,7 +2,7 @@ import { useAuth } from '@/context/AuthContext'
 import { supabase } from '@/lib/supabase'
 import { Anchor, ChevronRight, HardHat, Plus, Search } from 'lucide-react'
 import { useEffect, useState } from 'react'
-import { Link, useSearchParams } from 'react-router-dom'
+import { Link, useLocation, useSearchParams } from 'react-router-dom'
 
 const STATUSES = [
   'New Bid', 'Active Bid', 'No Bid', 'Bid Not Awarded',
@@ -33,10 +33,11 @@ export function ProjectList() {
   const [statusFilter, setStatusFilter] = useState('all')
 
   // Division tab: use URL param if elevated, else lock to user's division
+  const location     = useLocation()
   const divisionParam = searchParams.get('division')
   const activeDivision = userDivision ?? divisionParam ?? 'regular'
 
-  useEffect(() => { fetchProjects() }, [activeDivision, statusFilter])
+  useEffect(() => { fetchProjects() }, [activeDivision, statusFilter, location.key])
 
   async function fetchProjects() {
     setLoading(true)
