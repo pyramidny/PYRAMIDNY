@@ -1,13 +1,12 @@
 // src/pages/ProjectDetail.jsx
 // Route: /projects/:id
 // Reads: projects (pm, estimator, assistant_pm joins) + project_production
-// Writes: status updates via direct supabase (SELECT policy allows pm),
-//         checklist updates via Edge Function pattern
+// Writes: status, stage, checklist, team via Edge Functions
 
-import { useEffect, useState, useCallback } from 'react'
-import { Link, useParams } from 'react-router-dom'
-import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/context/AuthContext'
+import { supabase } from '@/lib/supabase'
+import { useCallback, useEffect, useState } from 'react'
+import { Link, useParams } from 'react-router-dom'
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -35,7 +34,6 @@ const STATUS_STYLES = {
   'Job Closed':      'bg-ink-100 text-ink-500 border-ink-200',
 }
 
-// Production checklist — regularOnly items hidden for IRA
 const CHECKLIST_FIELDS = [
   { key: 'project_transfer',      label: 'Project Transfer' },
   { key: 'coi_requested',         label: 'COI Requested' },
@@ -157,7 +155,7 @@ function StageTracker({ current, isPM, onAdvance }) {
 }
 
 function ProductionChecklist({ project, production, isPM, onChecklistChange }) {
-  const fields = CHECKLIST_FIELDS.filter(f => !f.regularOnly || project.division === 'regular')
+  const fields   = CHECKLIST_FIELDS.filter(f => !f.regularOnly || project.division === 'regular')
   const total    = fields.length
   const complete = fields.filter(f => production?.[f.key] === 'Yes' || production?.[f.key] === 'N/A').length
   const pct      = total > 0 ? Math.round(complete / total * 100) : 0
@@ -218,20 +216,145 @@ function ProductionChecklist({ project, production, isPM, onChecklistChange }) {
   )
 }
 
+// ── Team Card ─────────────────────────────────────────────────────────────────
+
+function TeamCard({ project, isPM, profiles, onSave, saving }) {
+  const [editing,   setEditing]   = useState(false)
+  const [draft,     setDraft]     = useState({})
+
+  const pms         = profiles.filter(p => p.role === 'pm')
+  const estimators  = profiles.filter(p => p.role === 'estimator')
+
+  function startEdit() {
+    setDraft({
+      pm_id:            project.pm_id ?? '',
+      assistant_pm_id:  project.assistant_pm_id ?? '',
+      estimator_id:     project.estimator_id ?? '',
+    })
+    setEditing(true)
+  }
+
+  function cancel() { setEditing(false) }
+
+  async function save() {
+    await onSave({
+      pm_id:           draft.pm_id           || null,
+      assistant_pm_id: draft.assistant_pm_id || null,
+      estimator_id:    draft.estimator_id    || null,
+    })
+    setEditing(false)
+  }
+
+  // ── Edit mode ──
+  if (editing) {
+    return (
+      <Card
+        title="Team"
+        action={
+          <div className="flex items-center gap-2">
+            <button
+              onClick={cancel}
+              className="text-xs text-ink-400 hover:text-ink-600 transition-colors"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={save}
+              disabled={saving}
+              className="text-xs font-semibold text-white bg-pyramid-500 hover:bg-pyramid-400
+                         disabled:opacity-60 px-3 py-1 rounded-lg transition-colors"
+            >
+              {saving ? 'Saving…' : 'Save'}
+            </button>
+          </div>
+        }
+      >
+        <div className="py-2 space-y-1">
+          <TeamSelect
+            label="Project Manager"
+            value={draft.pm_id}
+            options={pms}
+            onChange={v => setDraft(d => ({ ...d, pm_id: v }))}
+          />
+          <TeamSelect
+            label="Assistant PM"
+            value={draft.assistant_pm_id}
+            options={pms}
+            onChange={v => setDraft(d => ({ ...d, assistant_pm_id: v }))}
+          />
+          <TeamSelect
+            label="Estimator"
+            value={draft.estimator_id}
+            options={estimators}
+            onChange={v => setDraft(d => ({ ...d, estimator_id: v }))}
+          />
+        </div>
+      </Card>
+    )
+  }
+
+  // ── Read mode ──
+  return (
+    <Card
+      title="Team"
+      action={
+        isPM ? (
+          <button
+            onClick={startEdit}
+            className="text-xs font-semibold text-pyramid-600 hover:text-pyramid-500
+                       border border-pyramid-200 hover:border-pyramid-400
+                       px-2.5 py-1 rounded-lg transition-colors"
+          >
+            Edit
+          </button>
+        ) : null
+      }
+    >
+      <InfoRow label="Project Manager" value={profileName(project.pm)} />
+      <InfoRow label="Assistant PM"    value={profileName(project.assistant_pm)} />
+      <InfoRow label="Estimator"       value={profileName(project.estimator)} />
+    </Card>
+  )
+}
+
+function TeamSelect({ label, value, options, onChange }) {
+  return (
+    <div className="py-2.5 border-b border-ink-100 last:border-0">
+      <div className="text-[10px] font-semibold tracking-widest uppercase text-ink-400 mb-1.5">
+        {label}
+      </div>
+      <select
+        value={value}
+        onChange={e => onChange(e.target.value)}
+        className="w-full text-sm bg-ink-50 border border-ink-200 rounded-lg px-2.5 py-1.5
+                   text-ink-800 outline-none focus:border-pyramid-400 transition-colors"
+      >
+        <option value="">— Unassigned —</option>
+        {options.map(p => (
+          <option key={p.id} value={p.id}>
+            {p.display_name ?? p.full_name}
+          </option>
+        ))}
+      </select>
+    </div>
+  )
+}
+
 // ── Main page ─────────────────────────────────────────────────────────────────
 
 export default function ProjectDetail() {
-  const { id }          = useParams()
-  const { isPM, user }  = useAuth()
+  const { id }         = useParams()
+  const { isPM, user } = useAuth()
 
   const [project,    setProject]    = useState(null)
   const [production, setProduction] = useState(null)
+  const [profiles,   setProfiles]   = useState([])
   const [loading,    setLoading]    = useState(true)
   const [notFound,   setNotFound]   = useState(false)
   const [editStatus, setEditStatus] = useState(false)
   const [saving,     setSaving]     = useState(false)
 
-  // ── Fetch ──────────────────────────────────────────────────────────────────
+  // ── Fetch project + production ─────────────────────────────────────────────
   const fetchProject = useCallback(async () => {
     setLoading(true)
     const { data, error } = await supabase
@@ -260,10 +383,29 @@ export default function ProjectDetail() {
 
   useEffect(() => { fetchProject() }, [fetchProject])
 
-  // ── Status update (uses Edge Function) ────────────────────────────────────
-  const handleStatusChange = async (newStatus) => {
-    setSaving(true)
+  // ── Fetch profiles for team dropdowns (PMs + estimators) ──────────────────
+  useEffect(() => {
+    async function fetchProfiles() {
+      const { data } = await supabase
+        .from('profiles')
+        .select('id, display_name, full_name, role')
+        .in('role', ['pm', 'estimator'])
+        .eq('is_active', true)
+        .order('full_name')
+      if (data) setProfiles(data)
+    }
+    fetchProfiles()
+  }, [])
+
+  // ── Helper: call update-project Edge Function ──────────────────────────────
+  async function callUpdateProject(fields) {
     const { data: { session } } = await supabase.auth.getSession()
+    const token = session?.access_token
+
+    // Read the stored Azure AD token as fallback
+    const storedRaw   = localStorage.getItem('sb-izjaxmcdlsdkdliqjlei-auth-token')
+    const storedToken = storedRaw ? JSON.parse(storedRaw)?.access_token : null
+    const authToken   = token ?? storedToken ?? ''
 
     const res = await fetch(
       `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/update-project`,
@@ -271,49 +413,54 @@ export default function ProjectDetail() {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'apikey': import.meta.env.VITE_SUPABASE_ANON_KEY,
-          'Authorization': `Bearer ${session?.access_token ?? ''}`,
+          'apikey':        import.meta.env.VITE_SUPABASE_ANON_KEY,
+          'Authorization': `Bearer ${authToken}`,
         },
-        body: JSON.stringify({ id, status: newStatus }),
+        body: JSON.stringify({ id, ...fields }),
       }
     )
+    return res
+  }
 
+  // ── Status update ──────────────────────────────────────────────────────────
+  const handleStatusChange = async (newStatus) => {
+    setSaving(true)
+    const res = await callUpdateProject({ status: newStatus })
     if (res.ok) setProject((p) => ({ ...p, status: newStatus }))
     setEditStatus(false)
     setSaving(false)
   }
 
-  // ── Stage advance (uses Edge Function) ────────────────────────────────────
+  // ── Stage advance ──────────────────────────────────────────────────────────
   const handleAdvanceStage = async () => {
     if (!project || project.current_stage >= 6) return
     const next = project.current_stage + 1
     setSaving(true)
-    const { data: { session } } = await supabase.auth.getSession()
-
-    const res = await fetch(
-      `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/update-project`,
-      {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'apikey': import.meta.env.VITE_SUPABASE_ANON_KEY,
-          'Authorization': `Bearer ${session?.access_token ?? ''}`,
-        },
-        body: JSON.stringify({ id, current_stage: next }),
-      }
-    )
-
+    const res = await callUpdateProject({ current_stage: next })
     if (res.ok) setProject((p) => ({ ...p, current_stage: next }))
     setSaving(false)
   }
 
-  // ── Checklist update (uses Edge Function) ─────────────────────────────────
+  // ── Team save ──────────────────────────────────────────────────────────────
+  const handleTeamSave = async (teamFields) => {
+    setSaving(true)
+    const res = await callUpdateProject(teamFields)
+    if (res.ok) {
+      // Re-fetch to get the updated joined profile names
+      await fetchProject()
+    }
+    setSaving(false)
+  }
+
+  // ── Checklist update ───────────────────────────────────────────────────────
   const handleChecklistChange = async (key, value) => {
-    // Optimistic update
     const optimistic = { ...(production ?? { project_id: id }), [key]: value }
     setProduction(optimistic)
 
     const { data: { session } } = await supabase.auth.getSession()
+    const storedRaw   = localStorage.getItem('sb-izjaxmcdlsdkdliqjlei-auth-token')
+    const storedToken = storedRaw ? JSON.parse(storedRaw)?.access_token : null
+    const authToken   = session?.access_token ?? storedToken ?? ''
 
     await fetch(
       `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/upsert-production`,
@@ -321,8 +468,8 @@ export default function ProjectDetail() {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'apikey': import.meta.env.VITE_SUPABASE_ANON_KEY,
-          'Authorization': `Bearer ${session?.access_token ?? ''}`,
+          'apikey':        import.meta.env.VITE_SUPABASE_ANON_KEY,
+          'Authorization': `Bearer ${authToken}`,
         },
         body: JSON.stringify({ project_id: id, [key]: value }),
       }
@@ -426,7 +573,6 @@ export default function ProjectDetail() {
             {/* ── Left / main column ── */}
             <div className="lg:col-span-2 space-y-5">
 
-              {/* Production checklist — only when job is awarded+ */}
               {isProduction && (
                 <ProductionChecklist
                   project={project}
@@ -436,7 +582,6 @@ export default function ProjectDetail() {
                 />
               )}
 
-              {/* Bid timeline */}
               <Card title="Bid Timeline">
                 <div className="grid grid-cols-2 sm:grid-cols-3">
                   {[
@@ -451,7 +596,6 @@ export default function ProjectDetail() {
                 </div>
               </Card>
 
-              {/* Notes */}
               {project.notes && (
                 <Card title="Notes">
                   <p className="py-4 text-sm text-ink-700 leading-relaxed whitespace-pre-wrap">
@@ -469,11 +613,13 @@ export default function ProjectDetail() {
                 <InfoRow label="Contract Amount" value={fmtMoney(project.job_amount_contracted)} />
               </Card>
 
-              <Card title="Team">
-                <InfoRow label="Project Manager" value={profileName(project.pm)} />
-                <InfoRow label="Assistant PM"    value={profileName(project.assistant_pm)} />
-                <InfoRow label="Estimator"       value={profileName(project.estimator)} />
-              </Card>
+              <TeamCard
+                project={project}
+                isPM={isPM}
+                profiles={profiles}
+                onSave={handleTeamSave}
+                saving={saving}
+              />
 
               <Card title="Contacts">
                 <InfoRow label="Property Mgr / Owner" value={project.property_manager_owner} />
