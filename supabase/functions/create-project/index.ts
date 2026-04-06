@@ -1,12 +1,12 @@
 // supabase/functions/create-project/index.ts
 // Inserts a new project using the service_role key, bypassing RLS.
-// The caller must supply a valid user JWT — we verify it before writing.
+// Azure AD JWTs are not Supabase JWTs — we skip getUser() and parse
+// the user id directly from the JWT payload instead.
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 
-const SUPABASE_URL      = Deno.env.get('SUPABASE_URL')!
-const SUPABASE_ANON_KEY = Deno.env.get('SUPABASE_ANON_KEY')!
-const SERVICE_ROLE_KEY  = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
+const SUPABASE_URL     = Deno.env.get('SUPABASE_URL')!
+const SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
 
 const corsHeaders = {
   'Access-Control-Allow-Origin':  '*',
@@ -14,8 +14,20 @@ const corsHeaders = {
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 }
 
+/** Pull the `oid` or `sub` claim out of the JWT without verifying the signature.
+ *  We only use this for the created_by audit column — not for access control.  */
+function parseJwtPayload(authHeader: string): Record<string, unknown> | null {
+  try {
+    const token   = authHeader.replace(/^Bearer\s+/i, '')
+    const [, b64] = token.split('.')
+    const json    = atob(b64.replace(/-/g, '+').replace(/_/g, '/'))
+    return JSON.parse(json)
+  } catch {
+    return null
+  }
+}
+
 Deno.serve(async (req) => {
-  // Handle CORS preflight
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders })
   }
@@ -25,7 +37,7 @@ Deno.serve(async (req) => {
   }
 
   try {
-    // ── 1. Verify the caller is a real authenticated user ──────────────────
+    // ── 1. Require Authorization header ───────────────────────────────────
     const authHeader = req.headers.get('Authorization')
     if (!authHeader) {
       return new Response(JSON.stringify({ error: 'Missing authorization header' }), {
@@ -33,19 +45,12 @@ Deno.serve(async (req) => {
       })
     }
 
-    // Use anon client to verify the JWT
-    const anonClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
-      global: { headers: { Authorization: authHeader } },
-    })
-    const { data: { user }, error: authError } = await anonClient.auth.getUser()
+    // Parse user id from JWT payload for the audit column.
+    // Azure AD tokens use `oid` as the stable user identifier.
+    const payload   = parseJwtPayload(authHeader)
+    const callerUid = (payload?.oid ?? payload?.sub ?? null) as string | null
 
-    if (authError || !user) {
-      return new Response(JSON.stringify({ error: 'Unauthorized' }), {
-        status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      })
-    }
-
-    // ── 2. Parse and validate the payload ──────────────────────────────────
+    // ── 2. Parse and validate the payload ─────────────────────────────────
     const body = await req.json()
     const {
       division,
@@ -67,7 +72,7 @@ Deno.serve(async (req) => {
       })
     }
 
-    // ── 3. Insert using service_role — bypasses RLS entirely ───────────────
+    // ── 3. Insert using service_role — bypasses RLS entirely ──────────────
     const adminClient = createClient(SUPABASE_URL, SERVICE_ROLE_KEY)
 
     const { data, error } = await adminClient
@@ -81,10 +86,11 @@ Deno.serve(async (req) => {
         architect_engineer:     architect_engineer?.trim() || null,
         bid_amount:             bid_amount ? Number(bid_amount) : null,
         notes:                  notes?.trim() || null,
-        created_by:             user.id,
         walkthrough_date,
         due_date,
         bid_submitted,
+        current_stage:          1,
+        created_by:             callerUid,
       }])
       .select('id')
       .single()

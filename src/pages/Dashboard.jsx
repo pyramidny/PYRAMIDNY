@@ -1,11 +1,16 @@
+import { useAuth } from '@/context/AuthContext'
+import { supabase } from '@/lib/supabase'
+import {
+  AlertCircle,
+  Anchor,
+  ArrowRight,
+  ClipboardCheck,
+  FolderOpen,
+  HardHat,
+  TrendingUp
+} from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
-import {
-  FolderOpen, ClipboardCheck, AlertCircle, Clock,
-  TrendingUp, ArrowRight, HardHat, Anchor
-} from 'lucide-react'
-import { supabase } from '@/lib/supabase'
-import { useAuth } from '@/context/AuthContext'
 
 export function Dashboard() {
   const { profile, division } = useAuth()
@@ -22,34 +27,47 @@ export function Dashboard() {
   async function fetchData() {
     setLoading(true)
     try {
-      // Project counts by status
+      // ── Project counts by status ───────────────────────────────────────
       let query = supabase.from('projects').select('status, division')
       if (division) query = query.eq('division', division)
-      const { data: projects } = await query
+      const { data: projects, error: projectsError } = await query
 
-      // My open tasks
-      const { data: myTasks } = await supabase
-        .from('project_tasks')
-        .select(`
-          id, task_name, stage_number, due_date, status,
-          project:projects(project_number, project_address, division)
-        `)
-        .eq('assigned_to_id', (await supabase.auth.getUser()).data.user?.id)
-        .not('status', 'in', '("completed","skipped","na")')
-        .order('due_date', { ascending: true })
-        .limit(5)
+      if (projectsError) console.error('Projects query error:', projectsError)
 
       if (projects) {
         setStats({
-          activeBids:  projects.filter(p => p.status === 'Active Bid').length,
-          activeJobs:  projects.filter(p => p.status === 'Active Job').length,
-          awarded:     projects.filter(p => p.status === 'Job Awarded').length,
-          total:       projects.length,
-          regular:     projects.filter(p => p.division === 'regular').length,
-          ira:         projects.filter(p => p.division === 'ira').length,
+          activeBids: projects.filter(p => p.status === 'Active Bid').length,
+          activeJobs: projects.filter(p => p.status === 'Active Job').length,
+          awarded:    projects.filter(p => p.status === 'Job Awarded').length,
+          total:      projects.length,
+          regular:    projects.filter(p => p.division === 'regular').length,
+          ira:        projects.filter(p => p.division === 'ira').length,
         })
       }
-      if (myTasks) setTasks(myTasks)
+
+      // ── My open tasks — safe user id lookup ───────────────────────────
+      // supabase.auth.getUser() returns null for Azure AD tokens.
+      // Fall back to the profile id from AuthContext instead.
+      const userId = profile?.id ?? null
+
+      if (userId) {
+        const { data: myTasks, error: tasksError } = await supabase
+          .from('project_tasks')
+          .select(`
+            id, task_name, stage_number, due_date, status,
+            project:projects(project_number, project_address, division)
+          `)
+          .eq('assigned_to_id', userId)
+          .not('status', 'in', '("completed","skipped","na")')
+          .order('due_date', { ascending: true })
+          .limit(5)
+
+        if (tasksError) console.error('Tasks query error:', tasksError)
+        if (myTasks) setTasks(myTasks)
+      }
+
+    } catch (err) {
+      console.error('Dashboard fetchData error:', err)
     } finally {
       setLoading(false)
     }
@@ -70,7 +88,6 @@ export function Dashboard() {
             })}
           </p>
         </div>
-        {/* Division badge */}
         {profile?.division && (
           <div className={`flex items-center gap-2 px-3 py-1.5 rounded-full text-sm font-medium
             ${profile.division === 'regular'
