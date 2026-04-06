@@ -56,6 +56,9 @@ Deno.serve(async (req) => {
       architect_engineer,
       bid_amount,
       notes,
+      walkthrough_date = null,
+      due_date         = null,
+      bid_submitted    = false,
     } = body
 
     if (!project_address?.trim()) {
@@ -79,6 +82,9 @@ Deno.serve(async (req) => {
         bid_amount:             bid_amount ? Number(bid_amount) : null,
         notes:                  notes?.trim() || null,
         created_by:             user.id,
+        walkthrough_date,
+        due_date,
+        bid_submitted,
       }])
       .select('id')
       .single()

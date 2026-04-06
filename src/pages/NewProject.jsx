@@ -49,7 +49,13 @@ const EMPTY = {
   architect_engineer:     '',
   bid_amount:             '',
   notes:                  '',
+  // ── Section 4 — Timeline ──────────────────────────
+  walkthrough_date:       '',
+  due_date:               '',
+  bid_submitted:          false,
 }
+
+// ── Reusable primitives ───────────────────────────────────────────────────────
 
 function Label({ children, required }) {
   return (
@@ -65,6 +71,29 @@ function Input({ error, className = '', ...props }) {
       className={`
         w-full bg-stone-900 border rounded-sm px-3 py-2.5 text-stone-100
         text-sm placeholder-stone-600 outline-none transition-colors
+        ${error
+          ? 'border-red-500 focus:border-red-400'
+          : 'border-stone-700 focus:border-amber-500'}
+        ${className}
+      `}
+      {...props}
+    />
+  )
+}
+
+// Date input — native picker styled for dark theme.
+// color-scheme:dark makes the calendar popup dark on supported browsers.
+function DateInput({ error, className = '', ...props }) {
+  return (
+    <input
+      type="date"
+      style={{ colorScheme: 'dark' }}
+      className={`
+        w-full bg-stone-900 border rounded-sm px-3 py-2.5 text-stone-100
+        text-sm outline-none transition-colors
+        [&::-webkit-calendar-picker-indicator]:opacity-40
+        [&::-webkit-calendar-picker-indicator]:invert
+        [&::-webkit-calendar-picker-indicator]:cursor-pointer
         ${error
           ? 'border-red-500 focus:border-red-400'
           : 'border-stone-700 focus:border-amber-500'}
@@ -110,6 +139,40 @@ function Textarea({ error, className = '', ...props }) {
   )
 }
 
+// Toggle switch for boolean fields (bid_submitted)
+function Toggle({ checked, onChange, label, hint }) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={checked}
+      onClick={() => onChange(!checked)}
+      className="flex items-center justify-between w-full group"
+    >
+      <div className="text-left">
+        <span className="text-sm text-stone-300 group-hover:text-stone-100 transition-colors">
+          {label}
+        </span>
+        {hint && (
+          <p className="text-xs text-stone-600 mt-0.5">{hint}</p>
+        )}
+      </div>
+      <div className={`
+        relative flex-shrink-0 ml-4 w-10 h-5 rounded-full border transition-all duration-200
+        ${checked
+          ? 'bg-amber-500 border-amber-500'
+          : 'bg-stone-800 border-stone-700'}
+      `}>
+        <span className={`
+          absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white shadow-sm
+          transition-transform duration-200
+          ${checked ? 'translate-x-5' : 'translate-x-0'}
+        `} />
+      </div>
+    </button>
+  )
+}
+
 function FieldError({ msg }) {
   if (!msg) return null
   return <p className="mt-1 text-xs text-red-400">{msg}</p>
@@ -136,6 +199,8 @@ function Section({ number, title, children }) {
     </div>
   )
 }
+
+// ── Page component ────────────────────────────────────────────────────────────
 
 export default function NewProject() {
   const navigate = useNavigate()
@@ -172,7 +237,6 @@ export default function NewProject() {
     setServerErr(null)
 
     try {
-      // ── Call the Edge Function with the user's JWT ─────────────────────
       const { data: { session } } = await supabase.auth.getSession()
       const token = session?.access_token
 
@@ -186,6 +250,10 @@ export default function NewProject() {
           architect_engineer:     form.architect_engineer.trim() || null,
           bid_amount:             form.bid_amount ? Number(form.bid_amount) : null,
           notes:                  form.notes.trim() || null,
+          // ── Timeline fields ────────────────────────────────────────────
+          walkthrough_date:       form.walkthrough_date || null,
+          due_date:               form.due_date || null,
+          bid_submitted:          form.bid_submitted,
         },
         headers: token ? { Authorization: `Bearer ${token}` } : {},
       })
@@ -196,7 +264,6 @@ export default function NewProject() {
         return
       }
 
-      // Navigate to the new project detail or fall back to list
       navigate(data?.id ? `/projects/${data.id}` : '/projects')
 
     } catch (err) {
@@ -271,6 +338,7 @@ export default function NewProject() {
       <div className="max-w-3xl mx-auto px-6 py-10">
         <form onSubmit={handleSubmit} noValidate>
 
+          {/* Project address — top-level, outside sections */}
           <div className="mb-10">
             <Label required>Project Address</Label>
             <Input
@@ -286,6 +354,7 @@ export default function NewProject() {
 
           <div className="space-y-10">
 
+            {/* ── Section 1: Scope ── */}
             <Section number="1" title="Scope">
               <div>
                 <Label required>Scope Type</Label>
@@ -318,6 +387,7 @@ export default function NewProject() {
               </div>
             </Section>
 
+            {/* ── Section 2: Contacts ── */}
             <Section number="2" title="Contacts">
               <div>
                 <Label>Property Manager / Owner</Label>
@@ -339,6 +409,7 @@ export default function NewProject() {
               </div>
             </Section>
 
+            {/* ── Section 3: Bid Amount ── */}
             <Section number="3" title="Bid Amount">
               <div className="max-w-xs">
                 <Label>Bid Amount</Label>
@@ -358,6 +429,37 @@ export default function NewProject() {
                 </div>
                 <FieldError msg={errors.bid_amount} />
                 <p className="mt-1.5 text-xs text-stone-600">Leave blank if not yet determined.</p>
+              </div>
+            </Section>
+
+            {/* ── Section 4: Timeline ── */}
+            <Section number="4" title="Timeline">
+              {/* Date row — two pickers side by side */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <Label>Walkthrough Date</Label>
+                  <DateInput
+                    value={form.walkthrough_date}
+                    onChange={set('walkthrough_date')}
+                  />
+                </div>
+                <div>
+                  <Label>Bid Due Date</Label>
+                  <DateInput
+                    value={form.due_date}
+                    onChange={set('due_date')}
+                  />
+                </div>
+              </div>
+
+              {/* Bid submitted toggle */}
+              <div className="pt-1 pb-1 border-t border-stone-800">
+                <Toggle
+                  checked={form.bid_submitted}
+                  onChange={(val) => setForm((p) => ({ ...p, bid_submitted: val }))}
+                  label="Bid Already Submitted"
+                  hint="Toggle on if the bid package has been sent to the client."
+                />
               </div>
             </Section>
 
