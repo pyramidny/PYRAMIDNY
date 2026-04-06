@@ -4,9 +4,9 @@ import { useAuth } from '@/context/AuthContext'
 import { AuthCallback } from '@/pages/AuthCallback'
 import { Dashboard } from '@/pages/Dashboard'
 import { Login } from '@/pages/Login'
+import { MyTasks } from '@/pages/MyTasks'
 import NewProject from '@/pages/NewProject'; // ← ADD THIS
 import {
-  MyTasks,
   Settings,
   Team,
 } from '@/pages/Placeholders'

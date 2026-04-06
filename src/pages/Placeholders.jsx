@@ -5,11 +5,6 @@ export function ProjectDetail() {
   return <Placeholder title="Project Detail" description="Milestone tracker, task board, documents, and activity feed — coming next sprint." />
 }
 
-// ─── My Tasks ───────────────────────────────────────────────────
-export function MyTasks() {
-  return <Placeholder title="My Tasks" description="All open tasks assigned to you across projects, sorted by due date." />
-}
-
 // ─── Team ────────────────────────────────────────────────────────
 export function Team() {
   return <Placeholder title="Team" description="User directory, role assignments, and division access management." />
