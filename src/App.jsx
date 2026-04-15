@@ -10,12 +10,18 @@ import TeamManagement from '@/pages/TeamManagement'
 import { Settings, Team } from '@/pages/Placeholders'
 import ProjectDetail from '@/pages/ProjectDetail'
 import { ProjectList } from '@/pages/ProjectList'
-import { Navigate, Route, Routes } from 'react-router-dom'
+import { Navigate, Route, Routes, useLocation } from 'react-router-dom'
 
 export default function App() {
   const { loading } = useAuth()
+  const location = useLocation()
 
-  if (loading) return null
+  // Never block /auth/callback — it must mount immediately so the PKCE
+  // exchange runs before the one-time code expires. All other routes wait
+  // for auth state to resolve before rendering.
+  const isCallback = location.pathname === '/auth/callback'
+
+  if (loading && !isCallback) return null
 
   return (
     <Routes>
