@@ -1,6 +1,6 @@
 import { createClient } from '@supabase/supabase-js'
 
-const supabaseUrl  = import.meta.env.VITE_SUPABASE_URL
+const supabaseUrl = import.meta.env.VITE_SUPABASE_URL
 const supabaseAnon = import.meta.env.VITE_SUPABASE_ANON_KEY
 
 if (!supabaseUrl || !supabaseAnon) {
@@ -9,9 +9,13 @@ if (!supabaseUrl || !supabaseAnon) {
 
 export const supabase = createClient(supabaseUrl, supabaseAnon, {
   auth: {
-    autoRefreshToken:  true,
-    persistSession:    true,
-    detectSessionInUrl: false,  // WE call exchangeCodeForSession manually in AuthCallback
+    autoRefreshToken: true,
+    persistSession: true,
+    detectSessionInUrl: true,   // Let Supabase auto-exchange ?code= at any URL
     flowType: 'pkce',
+    // Bypass the Web Locks API — prevents the "lock stolen" error that kills
+    // the PKCE exchange when AuthContext and AuthCallback both initialize
+    // simultaneously on the /auth/callback page.
+    lock: async (_name, _timeout, fn) => fn(),
   },
 })
