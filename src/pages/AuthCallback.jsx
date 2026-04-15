@@ -7,19 +7,20 @@ export function AuthCallback() {
   const navigate = useNavigate()
 
   useEffect(() => {
+    let authSub = null
+    let fallbackTimer = null
+
     const run = async () => {
       try {
-        const url = window.location.href
-
-        // If already have a session, go straight to dashboard
+        // Already have a valid session? (e.g. page refresh on /auth/callback)
         const { data: { session: existing } } = await supabase.auth.getSession()
         if (existing) {
           navigate('/dashboard', { replace: true })
           return
         }
 
-        // Exchange PKCE code for session
-        const { error } = await supabase.auth.exchangeCodeForSession(url)
+        // Exchange the PKCE code for a session — we own this call
+        const { error } = await supabase.auth.exchangeCodeForSession(window.location.href)
         if (error) {
           console.error('[AuthCallback] exchange failed:', error.message)
           setStatus('Sign in failed — redirecting...')
@@ -27,21 +28,23 @@ export function AuthCallback() {
           return
         }
 
-        // Wait for onAuthStateChange to confirm session is live in context
-        // This prevents the race where ProtectedRoute redirects to /login
-        // before AuthContext has propagated the new session
+        // Wait for onAuthStateChange to confirm the session is live in AuthContext
+        // before navigating. This prevents the race condition where ProtectedRoute
+        // sees loading=false + session=null and bounces to /login.
         const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
-          if (event === 'SIGNED_IN' && session) {
+          if ((event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') && session) {
             subscription.unsubscribe()
+            clearTimeout(fallbackTimer)
             navigate('/dashboard', { replace: true })
           }
         })
+        authSub = subscription
 
-        // Safety fallback — if event doesn't fire within 5s
-        setTimeout(() => {
-          subscription.unsubscribe()
+        // Safety fallback — if the event never fires within 8s, bail to login
+        fallbackTimer = setTimeout(() => {
+          authSub?.unsubscribe()
           navigate('/login', { replace: true })
-        }, 5000)
+        }, 8000)
 
       } catch (e) {
         console.error('[AuthCallback] unexpected:', e)
@@ -50,6 +53,11 @@ export function AuthCallback() {
     }
 
     run()
+
+    return () => {
+      authSub?.unsubscribe()
+      clearTimeout(fallbackTimer)
+    }
   }, [navigate])
 
   return (
