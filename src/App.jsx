@@ -6,11 +6,8 @@ import { Dashboard } from '@/pages/Dashboard'
 import { Login } from '@/pages/Login'
 import { MyTasks } from '@/pages/MyTasks'
 import NewProject from '@/pages/NewProject'; // ← ADD THIS
-import {
-  import TeamManagement from '@/pages/TeamManagement'
-  Settings,
-  Team,
-} from '@/pages/Placeholders'
+import TeamManagement from '@/pages/TeamManagement'
+import { Settings, Team } from '@/pages/Placeholders'
 import ProjectDetail from '@/pages/ProjectDetail'
 import { ProjectList } from '@/pages/ProjectList'
 import { Navigate, Route, Routes } from 'react-router-dom'
