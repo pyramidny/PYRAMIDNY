@@ -7,6 +7,7 @@ import { Login } from '@/pages/Login'
 import { MyTasks } from '@/pages/MyTasks'
 import NewProject from '@/pages/NewProject'; // ← ADD THIS
 import {
+  import TeamManagement from '@/pages/TeamManagement'
   Settings,
   Team,
 } from '@/pages/Placeholders'
@@ -44,7 +45,7 @@ export default function App() {
         <Route path="/projects/new"   element={<NewProject />} />  {/* ← ADD THIS */}
         <Route path="/projects/:id"   element={<ProjectDetail />} />
         <Route path="/tasks"          element={<MyTasks />} />
-        <Route path="/team"           element={<Team />} />
+                  <Route path="/team"         element={<TeamManagement />} />
         <Route path="/settings"       element={<Settings />} />
       </Route>
 
