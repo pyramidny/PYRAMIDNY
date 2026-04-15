@@ -1,46 +1,46 @@
-import { supabase } from '@/lib/supabase'
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { supabase } from '@/lib/supabase'
 
 export function AuthCallback() {
   const [status, setStatus] = useState('Completing sign in...')
   const navigate = useNavigate()
 
   useEffect(() => {
-    const run = async () => {
-      try {
-        const { data, error } = await supabase.auth.exchangeCodeForSession(
-          window.location.href
-        )
-        if (error) {
-          console.error('[AuthCallback] error:', error.message)
-          setStatus('Error: ' + error.message)
-          setTimeout(() => navigate('/login', { replace: true }), 3000)
-          return
-        }
-        if (data && data.session) {
+    // Supabase automatically detects ?code= and calls exchangeCodeForSession
+    // internally via detectSessionInUrl. We just wait for the SIGNED_IN event.
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(
+      (event, session) => {
+        if (event === 'SIGNED_IN' && session) {
+          subscription.unsubscribe()
           navigate('/dashboard', { replace: true })
-        } else {
-          setStatus('Waiting for session...')
-          const { data: authData } = supabase.auth.onAuthStateChange(
-            (_event, session) => {
-              if (session) {
-                authData.subscription.unsubscribe()
-                navigate('/dashboard', { replace: true })
-              }
-            }
-          )
-          setTimeout(() => {
-            authData.subscription.unsubscribe()
-            navigate('/login', { replace: true })
-          }, 8000)
         }
-      } catch (e) {
-        console.error('[AuthCallback] unexpected error:', e)
-        navigate('/login', { replace: true })
+        if (event === 'TOKEN_REFRESHED' && session) {
+          subscription.unsubscribe()
+          navigate('/dashboard', { replace: true })
+        }
       }
+    )
+
+    // Also check if session already exists (handles page refresh case)
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (session) {
+        subscription.unsubscribe()
+        navigate('/dashboard', { replace: true })
+      }
+    })
+
+    // Fallback — if nothing happens in 10s, go to login
+    const timeout = setTimeout(() => {
+      subscription.unsubscribe()
+      setStatus('Sign in timed out. Redirecting...')
+      setTimeout(() => navigate('/login', { replace: true }), 1500)
+    }, 10000)
+
+    return () => {
+      subscription.unsubscribe()
+      clearTimeout(timeout)
     }
-    run()
   }, [navigate])
 
   return (
