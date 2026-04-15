@@ -1,666 +1,419 @@
 // src/pages/ProjectDetail.jsx
 // Route: /projects/:id
-// Reads: projects (pm, estimator, assistant_pm joins) + project_production
-// Writes: status, stage, checklist, team via Edge Functions
 
-import { useAuth } from '@/context/AuthContext'
-import { supabase } from '@/lib/supabase'
-import { useCallback, useEffect, useState } from 'react'
-import { Link, useParams } from 'react-router-dom'
-
-// ── Constants ─────────────────────────────────────────────────────────────────
+import { useEffect, useState, useCallback } from "react";
+import { useParams, useNavigate }           from "react-router-dom";
+import { useMsal }                          from "@azure/msal-react";
+import { supabase }                         from "../lib/supabase";
+import { proxyUpdateProject }               from "../lib/projectProxy";
 
 const STAGES = [
-  { n: 1, label: 'Bidding' },
-  { n: 2, label: 'Interview' },
-  { n: 3, label: 'Awarded' },
-  { n: 4, label: 'Transfer' },
-  { n: 5, label: 'Active' },
-  { n: 6, label: 'Closeout' },
-]
+  { num: 1, label: "Bidding" },
+  { num: 2, label: "Interview" },
+  { num: 3, label: "Job Awarded" },
+  { num: 4, label: "Job Transfer" },
+  { num: 5, label: "Job Commencement" },
+  { num: 6, label: "Job Closeout" },
+];
 
-const STATUSES = [
-  'New Bid', 'Active Bid', 'No Bid',
-  'Bid Not Awarded', 'Job Awarded', 'Active Job', 'Job Closed',
-]
+const MILESTONE_VALUES = ["Yes", "No", "Missing", "N/A"];
 
-const STATUS_STYLES = {
-  'New Bid':         'bg-ink-100 text-ink-600 border-ink-300',
-  'Active Bid':      'bg-blue-50 text-blue-700 border-blue-200',
-  'No Bid':          'bg-red-50 text-red-600 border-red-200',
-  'Bid Not Awarded': 'bg-orange-50 text-orange-600 border-orange-200',
-  'Job Awarded':     'bg-emerald-50 text-emerald-700 border-emerald-200',
-  'Active Job':      'bg-emerald-100 text-emerald-800 border-emerald-300',
-  'Job Closed':      'bg-ink-100 text-ink-500 border-ink-200',
+const VALUE_STYLES = {
+  Yes:     "bg-green-600 text-white",
+  No:      "bg-red-600 text-white",
+  Missing: "bg-yellow-500 text-gray-900",
+  "N/A":   "bg-gray-600 text-gray-300",
+};
+
+function fmt(d) {
+  if (!d) return "—";
+  return new Date(d).toLocaleDateString("en-US", {
+    month: "short", day: "numeric", year: "numeric",
+  });
 }
 
-const CHECKLIST_FIELDS = [
-  { key: 'project_transfer',      label: 'Project Transfer' },
-  { key: 'coi_requested',         label: 'COI Requested' },
-  { key: 'cci_requested',         label: 'CCI Requested' },
-  { key: 'submittals',            label: 'Submittals' },
-  { key: 'informational_package', label: 'Informational Package' },
-  { key: 'logistical_plan',       label: 'Logistical Plan' },
-  { key: 'dob_permits',           label: 'DOB Permits' },
-  { key: 'dot_permits',           label: 'DOT Permits' },
-  { key: 'cd5',                   label: 'CD-5' },
-  { key: 'retainage_closeout',    label: 'Retainage & Close Out', regularOnly: true },
-]
-
-const CHECKLIST_CYCLE = [null, 'Yes', 'N/A', 'No']
-
-const CHECKLIST_PILL = {
-  Yes:  'bg-emerald-100 text-emerald-700 border-emerald-200',
-  No:   'bg-red-100 text-red-600 border-red-200',
-  'N/A':'bg-ink-100 text-ink-500 border-ink-200',
-  null: 'bg-transparent text-ink-300 border-ink-200',
+function calcCompletion(milestones) {
+  if (!milestones.length) return 0;
+  const done = milestones.filter((m) => m.value === "Yes" || m.value === "N/A").length;
+  return Math.round((done / milestones.length) * 100);
 }
 
-const PRODUCTION_STATUSES = ['Job Awarded', 'Active Job', 'Job Closed']
-
-// ── Helpers ───────────────────────────────────────────────────────────────────
-
-const fmtDate = (d) => {
-  if (!d) return '—'
-  return new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
-}
-
-const fmtMoney = (v) => {
-  if (!v) return '—'
-  return new Intl.NumberFormat('en-US', {
-    style: 'currency', currency: 'USD',
-    minimumFractionDigits: 0, maximumFractionDigits: 0,
-  }).format(v)
-}
-
-const profileName = (p) => p?.display_name ?? p?.full_name ?? '—'
-
-// ── Sub-components ────────────────────────────────────────────────────────────
-
-function InfoRow({ label, value }) {
+function StageTracker({ currentStage, onStageChange, disabled }) {
   return (
-    <div className="py-3 border-b border-ink-100 last:border-0">
-      <div className="text-[10px] font-semibold tracking-widest uppercase text-ink-400 mb-0.5">
-        {label}
-      </div>
-      <div className="text-sm text-ink-800">{value || '—'}</div>
-    </div>
-  )
-}
-
-function Card({ title, children, action }) {
-  return (
-    <div className="bg-white border border-ink-200 rounded-xl shadow-sm overflow-hidden">
-      <div className="flex items-center justify-between px-5 py-3.5 border-b border-ink-100">
-        <h3 className="text-xs font-semibold tracking-widest uppercase text-ink-500">{title}</h3>
-        {action}
-      </div>
-      <div className="px-5 py-1">{children}</div>
-    </div>
-  )
-}
-
-function StageTracker({ current, isPM, onAdvance }) {
-  return (
-    <div className="bg-white border border-ink-200 rounded-xl shadow-sm px-6 py-5">
+    <div className="bg-gray-800 rounded-xl p-5 mb-6">
+      <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-4">
+        Project Stage
+      </h3>
       <div className="flex items-center">
-        {STAGES.map((s, i) => {
-          const done   = s.n < current
-          const active = s.n === current
-          const future = s.n > current
+        {STAGES.map((stage, idx) => {
+          const active = stage.num === currentStage;
+          const past   = stage.num < currentStage;
           return (
-            <div key={s.n} className="flex items-center flex-1 min-w-0">
-              <div className="flex flex-col items-center flex-shrink-0">
-                <div className={`
-                  w-8 h-8 rounded-full border-2 flex items-center justify-center
-                  text-xs font-bold transition-all
-                  ${done   ? 'bg-emerald-500 border-emerald-500 text-white' : ''}
-                  ${active ? 'bg-white border-pyramid-500 text-pyramid-600' : ''}
-                  ${future ? 'bg-ink-50 border-ink-200 text-ink-400' : ''}
-                `}>
-                  {done ? (
-                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-                    </svg>
-                  ) : s.n}
-                </div>
-                <span className={`
-                  mt-1.5 text-[10px] font-semibold tracking-wide hidden sm:block
-                  ${active ? 'text-pyramid-600' : done ? 'text-emerald-600' : 'text-ink-400'}
-                `}>
-                  {s.label}
-                </span>
-              </div>
-              {i < STAGES.length - 1 && (
-                <div className={`flex-1 h-0.5 mx-2 rounded ${done ? 'bg-emerald-400' : 'bg-ink-100'}`} />
+            <div key={stage.num} className="flex items-center flex-1 min-w-0">
+              <button
+                disabled={disabled}
+                onClick={() => !disabled && onStageChange(stage.num)}
+                className={[
+                  "flex flex-col items-center gap-1 flex-1 min-w-0 px-1 py-2 rounded-lg transition-all",
+                  active ? "bg-blue-600" : "",
+                  !disabled ? "cursor-pointer hover:bg-blue-700" : "cursor-default",
+                ].join(" ")}
+              >
+                <div className={[
+                  "w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold border-2",
+                  active ? "border-blue-300 bg-blue-500 text-white"
+                         : past ? "border-gray-500 bg-gray-600 text-gray-300"
+                                : "border-gray-600 bg-gray-700 text-gray-400",
+                ].join(" ")}>{past ? "✓" : stage.num}</div>
+                <span className={[
+                  "text-xs text-center leading-tight hidden sm:block",
+                  active ? "text-blue-200 font-semibold"
+                         : past ? "text-gray-400" : "text-gray-500",
+                ].join(" ")}>{stage.label}</span>
+              </button>
+              {idx < STAGES.length - 1 && (
+                <div className={[
+                  "h-0.5 w-3 flex-shrink-0",
+                  past || active ? "bg-blue-500" : "bg-gray-700",
+                ].join(" ")} />
               )}
             </div>
-          )
+          );
         })}
       </div>
-      {isPM && current < 6 && (
-        <div className="mt-4 flex justify-end">
-          <button
-            onClick={onAdvance}
-            className="text-xs font-semibold text-pyramid-600 hover:text-pyramid-500
-                       border border-pyramid-200 hover:border-pyramid-400
-                       px-3 py-1.5 rounded-lg transition-colors"
-          >
-            Advance to {STAGES[current]?.label} →
-          </button>
-        </div>
-      )}
     </div>
-  )
+  );
 }
 
-function ProductionChecklist({ project, production, isPM, onChecklistChange }) {
-  const fields   = CHECKLIST_FIELDS.filter(f => !f.regularOnly || project.division === 'regular')
-  const total    = fields.length
-  const complete = fields.filter(f => production?.[f.key] === 'Yes' || production?.[f.key] === 'N/A').length
-  const pct      = total > 0 ? Math.round(complete / total * 100) : 0
-
-  const cycle = (cur) => {
-    const idx = CHECKLIST_CYCLE.indexOf(cur ?? null)
-    return CHECKLIST_CYCLE[(idx + 1) % CHECKLIST_CYCLE.length]
-  }
-
+function MilestonePanel({ milestones, onValueChange, saving }) {
+  const pct = calcCompletion(milestones);
   return (
-    <Card
-      title="Production Checklist"
-      action={
+    <div className="bg-gray-800 rounded-xl p-5 mb-6">
+      <div className="flex items-center justify-between mb-3">
+        <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider">
+          Milestones
+        </h3>
         <div className="flex items-center gap-2">
-          <div className="w-20 h-1.5 bg-ink-100 rounded-full overflow-hidden">
+          <div className="w-28 h-2 bg-gray-700 rounded-full overflow-hidden">
             <div
-              className="h-full bg-emerald-500 rounded-full transition-all duration-500"
+              className="h-full bg-green-500 rounded-full transition-all"
               style={{ width: `${pct}%` }}
             />
           </div>
-          <span className="text-xs font-mono font-semibold text-ink-500">{pct}%</span>
+          <span className="text-xs text-gray-400 w-8 text-right">{pct}%</span>
         </div>
-      }
-    >
-      <div className="py-2 space-y-0.5">
-        {fields.map((f) => {
-          const val = production?.[f.key] ?? null
-          return (
-            <div
-              key={f.key}
-              onClick={() => isPM && onChecklistChange(f.key, cycle(val))}
-              className={`
-                flex items-center justify-between py-2.5 px-1 rounded-lg
-                ${isPM ? 'hover:bg-ink-50 cursor-pointer' : ''}
-                transition-colors
-              `}
-            >
-              <span className={`text-sm ${val ? 'text-ink-800' : 'text-ink-400'}`}>
-                {f.label}
-              </span>
-              <span className={`
-                text-xs font-semibold px-2.5 py-0.5 rounded-full border
-                min-w-[44px] text-center transition-colors
-                ${CHECKLIST_PILL[val] ?? CHECKLIST_PILL[null]}
-              `}>
-                {val ?? '—'}
-              </span>
-            </div>
-          )
-        })}
       </div>
-      {isPM && (
-        <p className="text-[10px] text-ink-400 pb-3 pt-1">
-          Click any row to cycle: — → Yes → N/A → No
+      {milestones.length === 0 ? (
+        <p className="text-sm text-gray-500 py-4 text-center">
+          No milestones found for this division.
         </p>
-      )}
-    </Card>
-  )
-}
-
-// ── Team Card ─────────────────────────────────────────────────────────────────
-
-function TeamCard({ project, isPM, profiles, onSave, saving }) {
-  const [editing,   setEditing]   = useState(false)
-  const [draft,     setDraft]     = useState({})
-
-  const pms         = profiles.filter(p => p.role === 'pm')
-  const estimators  = profiles.filter(p => p.role === 'estimator')
-
-  function startEdit() {
-    setDraft({
-      pm_id:            project.pm_id ?? '',
-      assistant_pm_id:  project.assistant_pm_id ?? '',
-      estimator_id:     project.estimator_id ?? '',
-    })
-    setEditing(true)
-  }
-
-  function cancel() { setEditing(false) }
-
-  async function save() {
-    await onSave({
-      pm_id:           draft.pm_id           || null,
-      assistant_pm_id: draft.assistant_pm_id || null,
-      estimator_id:    draft.estimator_id    || null,
-    })
-    setEditing(false)
-  }
-
-  // ── Edit mode ──
-  if (editing) {
-    return (
-      <Card
-        title="Team"
-        action={
-          <div className="flex items-center gap-2">
-            <button
-              onClick={cancel}
-              className="text-xs text-ink-400 hover:text-ink-600 transition-colors"
-            >
-              Cancel
-            </button>
-            <button
-              onClick={save}
-              disabled={saving}
-              className="text-xs font-semibold text-white bg-pyramid-500 hover:bg-pyramid-400
-                         disabled:opacity-60 px-3 py-1 rounded-lg transition-colors"
-            >
-              {saving ? 'Saving…' : 'Save'}
-            </button>
-          </div>
-        }
-      >
-        <div className="py-2 space-y-1">
-          <TeamSelect
-            label="Project Manager"
-            value={draft.pm_id}
-            options={pms}
-            onChange={v => setDraft(d => ({ ...d, pm_id: v }))}
-          />
-          <TeamSelect
-            label="Assistant PM"
-            value={draft.assistant_pm_id}
-            options={pms}
-            onChange={v => setDraft(d => ({ ...d, assistant_pm_id: v }))}
-          />
-          <TeamSelect
-            label="Estimator"
-            value={draft.estimator_id}
-            options={estimators}
-            onChange={v => setDraft(d => ({ ...d, estimator_id: v }))}
-          />
-        </div>
-      </Card>
-    )
-  }
-
-  // ── Read mode ──
-  return (
-    <Card
-      title="Team"
-      action={
-        isPM ? (
-          <button
-            onClick={startEdit}
-            className="text-xs font-semibold text-pyramid-600 hover:text-pyramid-500
-                       border border-pyramid-200 hover:border-pyramid-400
-                       px-2.5 py-1 rounded-lg transition-colors"
+      ) : (
+        milestones.map((m) => (
+          <div
+            key={m.id}
+            className="flex items-center justify-between py-2 border-b border-gray-700 last:border-0"
           >
-            Edit
-          </button>
-        ) : null
-      }
-    >
-      <InfoRow label="Project Manager" value={profileName(project.pm)} />
-      <InfoRow label="Assistant PM"    value={profileName(project.assistant_pm)} />
-      <InfoRow label="Estimator"       value={profileName(project.estimator)} />
-    </Card>
-  )
-}
-
-function TeamSelect({ label, value, options, onChange }) {
-  return (
-    <div className="py-2.5 border-b border-ink-100 last:border-0">
-      <div className="text-[10px] font-semibold tracking-widest uppercase text-ink-400 mb-1.5">
-        {label}
-      </div>
-      <select
-        value={value}
-        onChange={e => onChange(e.target.value)}
-        className="w-full text-sm bg-ink-50 border border-ink-200 rounded-lg px-2.5 py-1.5
-                   text-ink-800 outline-none focus:border-pyramid-400 transition-colors"
-      >
-        <option value="">— Unassigned —</option>
-        {options.map(p => (
-          <option key={p.id} value={p.id}>
-            {p.display_name ?? p.full_name}
-          </option>
-        ))}
-      </select>
+            <span className="text-sm text-gray-200 flex-1 mr-4">
+              {m.definition?.label ?? "—"}
+            </span>
+            <div className="flex gap-1">
+              {MILESTONE_VALUES.map((v) => (
+                <button
+                  key={v}
+                  disabled={saving}
+                  onClick={() => onValueChange(m.id, v)}
+                  className={[
+                    "px-2 py-0.5 rounded text-xs font-medium transition-all",
+                    m.value === v
+                      ? VALUE_STYLES[v]
+                      : "bg-gray-700 text-gray-400 hover:bg-gray-600",
+                    saving ? "opacity-50 cursor-not-allowed" : "cursor-pointer",
+                  ].join(" ")}
+                >{v}</button>
+              ))}
+            </div>
+          </div>
+        ))
+      )}
     </div>
-  )
+  );
 }
 
-// ── Main page ─────────────────────────────────────────────────────────────────
+function InfoGrid({ project, profiles }) {
+  const name = (id) => profiles[id]?.full_name ?? "—";
+  const rows = [
+    ["Project #",       project.project_number],
+    ["Division",        project.division],
+    ["Status",          project.status],
+    ["Scope",           project.scope_type],
+    ["Estimator",       name(project.estimator_id)],
+    ["PM",              name(project.pm_id)],
+    ["Asst PM",         name(project.assistant_pm_id)],
+    ["Prop Mgr/Owner",  project.property_manager_owner],
+    ["Arch/Eng",        project.architect_engineer],
+    ["Walkthrough",     fmt(project.walkthrough_date)],
+    ["Bid Due",         fmt(project.due_date)],
+    ["Bid Submitted",   project.bid_submitted ? "Yes" : "No"],
+    ["Bid Amount",      project.bid_amount
+                          ? `$${Number(project.bid_amount).toLocaleString()}` : "—"],
+    ["Interview Date",  fmt(project.bid_interview_date)],
+    ["Award Date",      fmt(project.job_award_date)],
+    ["Contract Amt",    project.job_amount_contracted
+                          ? `$${Number(project.job_amount_contracted).toLocaleString()}` : "—"],
+  ];
+  return (
+    <div className="bg-gray-800 rounded-xl p-5 mb-6">
+      <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-4">
+        Project Info
+      </h3>
+      <dl className="grid grid-cols-2 gap-x-6 gap-y-2">
+        {rows.map(([label, value]) => (
+          <div key={label}>
+            <dt className="text-xs text-gray-500">{label}</dt>
+            <dd className="text-sm text-gray-200 font-medium">{value ?? "—"}</dd>
+          </div>
+        ))}
+      </dl>
+    </div>
+  );
+}
+
+function ActivityFeed({ activity, profiles }) {
+  return (
+    <div className="bg-gray-800 rounded-xl p-5 mb-6">
+      <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">
+        Activity
+      </h3>
+      {activity.length === 0 ? (
+        <p className="text-sm text-gray-500 text-center py-4">No activity yet</p>
+      ) : (
+        <div className="space-y-3">
+          {activity.map((a) => {
+            const p      = a.author_id ? profiles[a.author_id] : null;
+            const author = p ? (p.display_name ?? p.full_name) : "System";
+            return (
+              <div key={a.id} className="flex gap-3">
+                <div className="w-1.5 h-1.5 rounded-full bg-blue-500 mt-2 flex-shrink-0" />
+                <div>
+                  <p className="text-sm text-gray-200">{a.body}</p>
+                  <p className="text-xs text-gray-500 mt-0.5">
+                    {author} · {fmt(a.created_at)}
+                  </p>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function NotesPanel({ notes, onSave, saving }) {
+  const [draft, setDraft] = useState(notes ?? "");
+  const dirty = draft !== (notes ?? "");
+  return (
+    <div className="bg-gray-800 rounded-xl p-5 mb-6">
+      <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">
+        Notes
+      </h3>
+      <textarea
+        className="w-full bg-gray-700 text-gray-200 rounded-lg p-3 text-sm resize-y min-h-[100px] focus:outline-none focus:ring-2 focus:ring-blue-500"
+        value={draft}
+        onChange={(e) => setDraft(e.target.value)}
+        placeholder="Add project notes…"
+      />
+      {dirty && (
+        <div className="flex justify-end mt-2">
+          <button
+            disabled={saving}
+            onClick={() => onSave(draft)}
+            className="px-4 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-sm rounded-lg transition-all disabled:opacity-50"
+          >
+            {saving ? "Saving…" : "Save Notes"}
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
 
 export default function ProjectDetail() {
-  const { id }         = useParams()
-  const { isPM, user } = useAuth()
+  const { id }                 = useParams();
+  const navigate               = useNavigate();
+  const { accounts, instance } = useMsal();
 
-  const [project,    setProject]    = useState(null)
-  const [production, setProduction] = useState(null)
-  const [profiles,   setProfiles]   = useState([])
-  const [loading,    setLoading]    = useState(true)
-  const [notFound,   setNotFound]   = useState(false)
-  const [editStatus, setEditStatus] = useState(false)
-  const [saving,     setSaving]     = useState(false)
+  const [project,    setProject]    = useState(null);
+  const [milestones, setMilestones] = useState([]);
+  const [activity,   setActivity]   = useState([]);
+  const [profiles,   setProfiles]   = useState({});
+  const [loading,    setLoading]    = useState(true);
+  const [saving,     setSaving]     = useState(false);
+  const [toast,      setToast]      = useState(null);
 
-  // ── Fetch project + production ─────────────────────────────────────────────
-  const fetchProject = useCallback(async () => {
-    setLoading(true)
-    const { data, error } = await supabase
-      .from('projects')
-      .select(`
-        *,
-        pm:profiles!pm_id(id, display_name, full_name),
-        estimator:profiles!estimator_id(id, display_name, full_name),
-        assistant_pm:profiles!assistant_pm_id(id, display_name, full_name)
-      `)
-      .eq('id', id)
-      .single()
+  const showToast = (msg, type = "success") => {
+    setToast({ msg, type });
+    setTimeout(() => setToast(null), 3000);
+  };
 
-    if (error || !data) { setNotFound(true); setLoading(false); return }
-    setProject(data)
+  const getToken = useCallback(async () => {
+    const r = await instance.acquireTokenSilent({
+      account: accounts[0],
+      scopes:  ["User.Read"],
+    });
+    return r.accessToken;
+  }, [accounts, instance]);
 
-    const { data: prod } = await supabase
-      .from('project_production')
-      .select('*')
-      .eq('project_id', id)
-      .maybeSingle()
-
-    setProduction(prod ?? null)
-    setLoading(false)
-  }, [id])
-
-  useEffect(() => { fetchProject() }, [fetchProject])
-
-  // ── Fetch profiles for team dropdowns (PMs + estimators) ──────────────────
   useEffect(() => {
-    async function fetchProfiles() {
-      const { data } = await supabase
-        .from('profiles')
-        .select('id, display_name, full_name, role')
-        .in('role', ['pm', 'estimator'])
-        .eq('is_active', true)
-        .order('full_name')
-      if (data) setProfiles(data)
-    }
-    fetchProfiles()
-  }, [])
+    async function load() {
+      setLoading(true);
+      try {
+        const { data: proj, error: pErr } = await supabase
+          .from("projects").select("*").eq("id", id).single();
+        if (pErr) throw pErr;
+        setProject(proj);
 
-  // ── Helper: call update-project Edge Function ──────────────────────────────
-  async function callUpdateProject(fields) {
-    const { data: { session } } = await supabase.auth.getSession()
-    const token = session?.access_token
+        const { data: ms } = await supabase
+          .from("project_milestones")
+          .select(`
+            id, value, milestone_def_id, updated_at,
+            definition:milestone_definitions ( id, label, sort_order, key )
+          `)
+          .eq("project_id", id)
+          .order("definition(sort_order)");
+        setMilestones(ms ?? []);
 
-    // Read the stored Azure AD token as fallback
-    const storedRaw   = localStorage.getItem('sb-izjaxmcdlsdkdliqjlei-auth-token')
-    const storedToken = storedRaw ? JSON.parse(storedRaw)?.access_token : null
-    const authToken   = token ?? storedToken ?? ''
+        const { data: act } = await supabase
+          .from("project_activity")
+          .select("id, activity_type, body, created_at, author_id")
+          .eq("project_id", id)
+          .order("created_at", { ascending: false })
+          .limit(20);
+        setActivity(act ?? []);
 
-    const res = await fetch(
-      `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/update-project`,
-      {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'apikey':        import.meta.env.VITE_SUPABASE_ANON_KEY,
-          'Authorization': `Bearer ${authToken}`,
-        },
-        body: JSON.stringify({ id, ...fields }),
+        const { data: profs } = await supabase
+          .from("profiles").select("id, full_name, display_name");
+        if (profs) setProfiles(Object.fromEntries(profs.map((p) => [p.id, p])));
+      } catch (err) {
+        showToast(err.message, "error");
+      } finally {
+        setLoading(false);
       }
-    )
-    return res
-  }
-
-  // ── Status update ──────────────────────────────────────────────────────────
-  const handleStatusChange = async (newStatus) => {
-    setSaving(true)
-    const res = await callUpdateProject({ status: newStatus })
-    if (res.ok) setProject((p) => ({ ...p, status: newStatus }))
-    setEditStatus(false)
-    setSaving(false)
-  }
-
-  // ── Stage advance ──────────────────────────────────────────────────────────
-  const handleAdvanceStage = async () => {
-    if (!project || project.current_stage >= 6) return
-    const next = project.current_stage + 1
-    setSaving(true)
-    const res = await callUpdateProject({ current_stage: next })
-    if (res.ok) setProject((p) => ({ ...p, current_stage: next }))
-    setSaving(false)
-  }
-
-  // ── Team save ──────────────────────────────────────────────────────────────
-  const handleTeamSave = async (teamFields) => {
-    setSaving(true)
-    const res = await callUpdateProject(teamFields)
-    if (res.ok) {
-      // Re-fetch to get the updated joined profile names
-      await fetchProject()
     }
-    setSaving(false)
+    load();
+  }, [id]);
+
+  async function handleStageChange(stage) {
+    setSaving(true);
+    try {
+      const token   = await getToken();
+      const updated = await proxyUpdateProject(id, { current_stage: stage }, token);
+      setProject(updated);
+      showToast(`Moved to Stage ${stage}`);
+    } catch (err) {
+      showToast(err.message, "error");
+    } finally {
+      setSaving(false);
+    }
   }
 
-  // ── Checklist update ───────────────────────────────────────────────────────
-  const handleChecklistChange = async (key, value) => {
-    const optimistic = { ...(production ?? { project_id: id }), [key]: value }
-    setProduction(optimistic)
-
-    const { data: { session } } = await supabase.auth.getSession()
-    const storedRaw   = localStorage.getItem('sb-izjaxmcdlsdkdliqjlei-auth-token')
-    const storedToken = storedRaw ? JSON.parse(storedRaw)?.access_token : null
-    const authToken   = session?.access_token ?? storedToken ?? ''
-
-    await fetch(
-      `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/upsert-production`,
-      {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'apikey':        import.meta.env.VITE_SUPABASE_ANON_KEY,
-          'Authorization': `Bearer ${authToken}`,
-        },
-        body: JSON.stringify({ project_id: id, [key]: value }),
-      }
-    )
+  // Milestone UPDATEs go direct — rows already exist from seed, temp RLS allows it
+  async function handleMilestoneChange(milestoneRowId, value) {
+    setSaving(true);
+    try {
+      const { data, error } = await supabase
+        .from("project_milestones")
+        .update({ value, updated_at: new Date().toISOString() })
+        .eq("id", milestoneRowId)
+        .select("id, value")
+        .single();
+      if (error) throw error;
+      setMilestones((prev) =>
+        prev.map((m) => (m.id === milestoneRowId ? { ...m, value: data.value } : m))
+      );
+    } catch (err) {
+      showToast(err.message, "error");
+    } finally {
+      setSaving(false);
+    }
   }
 
-  // ── Loading / error states ─────────────────────────────────────────────────
-  if (loading) return <DetailSkeleton />
+  async function handleSaveNotes(notes) {
+    setSaving(true);
+    try {
+      const token   = await getToken();
+      const updated = await proxyUpdateProject(id, { notes }, token);
+      setProject(updated);
+      showToast("Notes saved");
+    } catch (err) {
+      showToast(err.message, "error");
+    } finally {
+      setSaving(false);
+    }
+  }
 
-  if (notFound) return (
-    <div className="flex flex-col items-center justify-center min-h-[60vh] text-center p-8">
-      <p className="text-lg font-semibold text-ink-700 mb-2">Project not found</p>
-      <Link to="/projects" className="text-pyramid-600 hover:text-pyramid-500 text-sm font-medium">
-        ← Back to projects
-      </Link>
-    </div>
-  )
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <div className="w-8 h-8 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
+      </div>
+    );
+  }
+  if (!project) return null;
 
-  const isProduction = PRODUCTION_STATUSES.includes(project.status)
-
-  // ── Render ─────────────────────────────────────────────────────────────────
   return (
-    <div className="flex flex-col h-full bg-ink-50">
+    <div className="max-w-4xl mx-auto p-4 sm:p-6">
+      {toast && (
+        <div className={[
+          "fixed top-4 right-4 z-50 px-4 py-2 rounded-lg text-sm font-medium shadow-lg",
+          toast.type === "error" ? "bg-red-600 text-white" : "bg-green-600 text-white",
+        ].join(" ")}>{toast.msg}</div>
+      )}
 
-      {/* ── Sticky header ── */}
-      <div className="bg-white border-b border-ink-200 px-6 py-4 flex-shrink-0">
-        <div className="flex items-start justify-between gap-4">
-          <div className="flex items-center gap-4 min-w-0">
-            <Link to="/projects" className="text-ink-400 hover:text-ink-600 transition-colors flex-shrink-0">
-              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M10 19l-7-7m0 0l7-7m-7 7h18" />
-              </svg>
-            </Link>
-            <div className="min-w-0">
-              <div className="flex items-center gap-2 flex-wrap mb-1">
-                <span className={`font-mono text-xs font-bold px-2 py-0.5 rounded border
-                  ${project.division === 'regular'
-                    ? 'bg-regular/10 text-regular border-regular/20'
-                    : 'bg-ira/10 text-ira border-ira/20'
-                  }`}>
-                  {project.project_number ?? '—'}
-                </span>
-                <span className="text-[10px] uppercase tracking-widest text-ink-400 font-semibold">
-                  {project.division === 'ira' ? 'IRA / Rope Access' : 'Regular'}
-                </span>
-              </div>
-              <h1 className="text-lg font-condensed font-bold text-ink-900 leading-tight truncate max-w-xl">
-                {project.project_address}
-              </h1>
-              {project.scope_type && (
-                <p className="text-xs text-ink-500 mt-0.5">{project.scope_type}</p>
-              )}
-            </div>
+      <div className="flex items-start gap-4 mb-6">
+        <button
+          onClick={() => navigate("/projects")}
+          className="text-gray-400 hover:text-white mt-1 transition-colors"
+        >
+          ← Back
+        </button>
+        <div className="flex-1">
+          <div className="flex items-center gap-3 flex-wrap">
+            <h1 className="text-2xl font-bold text-white">{project.project_address}</h1>
+            <span className={[
+              "px-2 py-0.5 rounded-full text-xs font-semibold uppercase",
+              project.division === "ira"
+                ? "bg-purple-700 text-purple-200"
+                : "bg-blue-700 text-blue-200",
+            ].join(" ")}>{project.division}</span>
           </div>
-
-          {/* Status badge */}
-          <div className="flex-shrink-0">
-            {editStatus ? (
-              <select
-                autoFocus
-                className="input text-xs py-1.5 pr-8 min-w-[160px]"
-                defaultValue={project.status}
-                onChange={(e) => handleStatusChange(e.target.value)}
-                onBlur={() => setEditStatus(false)}
-              >
-                {STATUSES.map(s => (
-                  <option key={s} value={s}>{s}</option>
-                ))}
-              </select>
-            ) : (
-              <button
-                onClick={() => isPM && setEditStatus(true)}
-                className={`
-                  text-xs font-semibold px-3 py-1.5 rounded-full border transition-colors
-                  ${STATUS_STYLES[project.status] ?? 'bg-ink-100 text-ink-500 border-ink-200'}
-                  ${isPM ? 'hover:opacity-75 cursor-pointer' : 'cursor-default'}
-                `}
-              >
-                {project.status}
-                {isPM && <span className="ml-1.5 opacity-50">▾</span>}
-              </button>
-            )}
-          </div>
+          <p className="text-gray-400 text-sm mt-0.5">
+            {project.project_number && `#${project.project_number} · `}
+            {project.status}
+          </p>
         </div>
       </div>
 
-      {/* ── Scrollable body ── */}
-      <div className="flex-1 overflow-y-auto">
-        <div className="max-w-6xl mx-auto px-6 py-6 space-y-5">
+      <StageTracker
+        currentStage={project.current_stage ?? 1}
+        onStageChange={handleStageChange}
+        disabled={saving}
+      />
 
-          {/* Stage tracker */}
-          <StageTracker
-            current={project.current_stage ?? 1}
-            isPM={isPM}
-            onAdvance={handleAdvanceStage}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <div>
+          <InfoGrid project={project} profiles={profiles} />
+          <NotesPanel notes={project.notes} onSave={handleSaveNotes} saving={saving} />
+          <ActivityFeed activity={activity} profiles={profiles} />
+        </div>
+        <div>
+          <MilestonePanel
+            milestones={milestones}
+            onValueChange={handleMilestoneChange}
+            saving={saving}
           />
-
-          {/* Two-column layout */}
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
-
-            {/* ── Left / main column ── */}
-            <div className="lg:col-span-2 space-y-5">
-
-              {isProduction && (
-                <ProductionChecklist
-                  project={project}
-                  production={production}
-                  isPM={isPM}
-                  onChecklistChange={handleChecklistChange}
-                />
-              )}
-
-              <Card title="Bid Timeline">
-                <div className="grid grid-cols-2 sm:grid-cols-3">
-                  {[
-                    { label: 'Walkthrough',   value: fmtDate(project.walkthrough_date) },
-                    { label: 'Bid Due',       value: fmtDate(project.due_date) },
-                    { label: 'Bid Submitted', value: project.bid_submitted ? 'Yes' : '—' },
-                    { label: 'Interview',     value: fmtDate(project.bid_interview_date) },
-                    { label: 'Award Date',    value: fmtDate(project.job_award_date) },
-                  ].map(({ label, value }) => (
-                    <InfoRow key={label} label={label} value={value} />
-                  ))}
-                </div>
-              </Card>
-
-              {project.notes && (
-                <Card title="Notes">
-                  <p className="py-4 text-sm text-ink-700 leading-relaxed whitespace-pre-wrap">
-                    {project.notes}
-                  </p>
-                </Card>
-              )}
-            </div>
-
-            {/* ── Right / sidebar ── */}
-            <div className="space-y-5">
-
-              <Card title="Financials">
-                <InfoRow label="Bid Amount"      value={fmtMoney(project.bid_amount)} />
-                <InfoRow label="Contract Amount" value={fmtMoney(project.job_amount_contracted)} />
-              </Card>
-
-              <TeamCard
-                project={project}
-                isPM={isPM}
-                profiles={profiles}
-                onSave={handleTeamSave}
-                saving={saving}
-              />
-
-              <Card title="Contacts">
-                <InfoRow label="Property Mgr / Owner" value={project.property_manager_owner} />
-                <InfoRow label="Architect / Engineer" value={project.architect_engineer} />
-              </Card>
-
-            </div>
-          </div>
         </div>
       </div>
     </div>
-  )
-}
-
-// ── Loading skeleton ──────────────────────────────────────────────────────────
-function DetailSkeleton() {
-  return (
-    <div className="flex flex-col h-full bg-ink-50 animate-pulse">
-      <div className="bg-white border-b border-ink-200 px-6 py-4">
-        <div className="flex items-center gap-4">
-          <div className="w-5 h-5 bg-ink-100 rounded" />
-          <div className="space-y-2 flex-1">
-            <div className="h-4 w-24 bg-ink-100 rounded" />
-            <div className="h-5 w-72 bg-ink-100 rounded" />
-          </div>
-          <div className="h-7 w-28 bg-ink-100 rounded-full" />
-        </div>
-      </div>
-      <div className="flex-1 p-6 space-y-5">
-        <div className="h-20 bg-white rounded-xl border border-ink-200" />
-        <div className="grid grid-cols-3 gap-5">
-          <div className="col-span-2 space-y-5">
-            <div className="h-64 bg-white rounded-xl border border-ink-200" />
-            <div className="h-40 bg-white rounded-xl border border-ink-200" />
-          </div>
-          <div className="space-y-5">
-            <div className="h-32 bg-white rounded-xl border border-ink-200" />
-            <div className="h-40 bg-white rounded-xl border border-ink-200" />
-          </div>
-        </div>
-      </div>
-    </div>
-  )
+  );
 }
