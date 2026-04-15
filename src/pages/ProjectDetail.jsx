@@ -1,419 +1,324 @@
-// src/pages/ProjectDetail.jsx
-// Route: /projects/:id
+import { useState, useEffect, useCallback } from 'react'
+import { useParams, useNavigate } from 'react-router-dom'
+import { supabase } from '@/lib/supabase'
+import { useAuth } from '@/context/AuthContext'
+import { useSharePoint } from '@/hooks/useSharePoint'
 
-import { useEffect, useState, useCallback } from "react";
-import { useParams, useNavigate }           from "react-router-dom";
-import { useMsal }                          from "@azure/msal-react";
-import { supabase }                         from "../lib/supabase";
-import { proxyUpdateProject }               from "../lib/projectProxy";
+const PROXY_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/project-proxy`
 
-const STAGES = [
-  { num: 1, label: "Bidding" },
-  { num: 2, label: "Interview" },
-  { num: 3, label: "Job Awarded" },
-  { num: 4, label: "Job Transfer" },
-  { num: 5, label: "Job Commencement" },
-  { num: 6, label: "Job Closeout" },
-];
-
-const MILESTONE_VALUES = ["Yes", "No", "Missing", "N/A"];
-
-const VALUE_STYLES = {
-  Yes:     "bg-green-600 text-white",
-  No:      "bg-red-600 text-white",
-  Missing: "bg-yellow-500 text-gray-900",
-  "N/A":   "bg-gray-600 text-gray-300",
-};
-
-function fmt(d) {
-  if (!d) return "—";
-  return new Date(d).toLocaleDateString("en-US", {
-    month: "short", day: "numeric", year: "numeric",
-  });
+const STATUS_COLORS = {
+  active:    'bg-green-100 text-green-800',
+  pending:   'bg-yellow-100 text-yellow-800',
+  complete:  'bg-blue-100 text-blue-800',
+  on_hold:   'bg-gray-100 text-gray-700',
+  cancelled: 'bg-red-100 text-red-700',
 }
 
-function calcCompletion(milestones) {
-  if (!milestones.length) return 0;
-  const done = milestones.filter((m) => m.value === "Yes" || m.value === "N/A").length;
-  return Math.round((done / milestones.length) * 100);
+function fileIcon(name = '') {
+  const ext = name.split('.').pop()?.toLowerCase()
+  return { pdf:'📄', doc:'📝', docx:'📝', xls:'📊', xlsx:'📊',
+           ppt:'📋', pptx:'📋', jpg:'🖼️', jpeg:'🖼️', png:'🖼️',
+           zip:'🗜️', mp4:'🎬' }[ext] ?? '📎'
 }
 
-function StageTracker({ currentStage, onStageChange, disabled }) {
-  return (
-    <div className="bg-gray-800 rounded-xl p-5 mb-6">
-      <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-4">
-        Project Stage
-      </h3>
-      <div className="flex items-center">
-        {STAGES.map((stage, idx) => {
-          const active = stage.num === currentStage;
-          const past   = stage.num < currentStage;
-          return (
-            <div key={stage.num} className="flex items-center flex-1 min-w-0">
-              <button
-                disabled={disabled}
-                onClick={() => !disabled && onStageChange(stage.num)}
-                className={[
-                  "flex flex-col items-center gap-1 flex-1 min-w-0 px-1 py-2 rounded-lg transition-all",
-                  active ? "bg-blue-600" : "",
-                  !disabled ? "cursor-pointer hover:bg-blue-700" : "cursor-default",
-                ].join(" ")}
-              >
-                <div className={[
-                  "w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold border-2",
-                  active ? "border-blue-300 bg-blue-500 text-white"
-                         : past ? "border-gray-500 bg-gray-600 text-gray-300"
-                                : "border-gray-600 bg-gray-700 text-gray-400",
-                ].join(" ")}>{past ? "✓" : stage.num}</div>
-                <span className={[
-                  "text-xs text-center leading-tight hidden sm:block",
-                  active ? "text-blue-200 font-semibold"
-                         : past ? "text-gray-400" : "text-gray-500",
-                ].join(" ")}>{stage.label}</span>
-              </button>
-              {idx < STAGES.length - 1 && (
-                <div className={[
-                  "h-0.5 w-3 flex-shrink-0",
-                  past || active ? "bg-blue-500" : "bg-gray-700",
-                ].join(" ")} />
-              )}
-            </div>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
-
-function MilestonePanel({ milestones, onValueChange, saving }) {
-  const pct = calcCompletion(milestones);
-  return (
-    <div className="bg-gray-800 rounded-xl p-5 mb-6">
-      <div className="flex items-center justify-between mb-3">
-        <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider">
-          Milestones
-        </h3>
-        <div className="flex items-center gap-2">
-          <div className="w-28 h-2 bg-gray-700 rounded-full overflow-hidden">
-            <div
-              className="h-full bg-green-500 rounded-full transition-all"
-              style={{ width: `${pct}%` }}
-            />
-          </div>
-          <span className="text-xs text-gray-400 w-8 text-right">{pct}%</span>
-        </div>
-      </div>
-      {milestones.length === 0 ? (
-        <p className="text-sm text-gray-500 py-4 text-center">
-          No milestones found for this division.
-        </p>
-      ) : (
-        milestones.map((m) => (
-          <div
-            key={m.id}
-            className="flex items-center justify-between py-2 border-b border-gray-700 last:border-0"
-          >
-            <span className="text-sm text-gray-200 flex-1 mr-4">
-              {m.definition?.label ?? "—"}
-            </span>
-            <div className="flex gap-1">
-              {MILESTONE_VALUES.map((v) => (
-                <button
-                  key={v}
-                  disabled={saving}
-                  onClick={() => onValueChange(m.id, v)}
-                  className={[
-                    "px-2 py-0.5 rounded text-xs font-medium transition-all",
-                    m.value === v
-                      ? VALUE_STYLES[v]
-                      : "bg-gray-700 text-gray-400 hover:bg-gray-600",
-                    saving ? "opacity-50 cursor-not-allowed" : "cursor-pointer",
-                  ].join(" ")}
-                >{v}</button>
-              ))}
-            </div>
-          </div>
-        ))
-      )}
-    </div>
-  );
-}
-
-function InfoGrid({ project, profiles }) {
-  const name = (id) => profiles[id]?.full_name ?? "—";
-  const rows = [
-    ["Project #",       project.project_number],
-    ["Division",        project.division],
-    ["Status",          project.status],
-    ["Scope",           project.scope_type],
-    ["Estimator",       name(project.estimator_id)],
-    ["PM",              name(project.pm_id)],
-    ["Asst PM",         name(project.assistant_pm_id)],
-    ["Prop Mgr/Owner",  project.property_manager_owner],
-    ["Arch/Eng",        project.architect_engineer],
-    ["Walkthrough",     fmt(project.walkthrough_date)],
-    ["Bid Due",         fmt(project.due_date)],
-    ["Bid Submitted",   project.bid_submitted ? "Yes" : "No"],
-    ["Bid Amount",      project.bid_amount
-                          ? `$${Number(project.bid_amount).toLocaleString()}` : "—"],
-    ["Interview Date",  fmt(project.bid_interview_date)],
-    ["Award Date",      fmt(project.job_award_date)],
-    ["Contract Amt",    project.job_amount_contracted
-                          ? `$${Number(project.job_amount_contracted).toLocaleString()}` : "—"],
-  ];
-  return (
-    <div className="bg-gray-800 rounded-xl p-5 mb-6">
-      <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-4">
-        Project Info
-      </h3>
-      <dl className="grid grid-cols-2 gap-x-6 gap-y-2">
-        {rows.map(([label, value]) => (
-          <div key={label}>
-            <dt className="text-xs text-gray-500">{label}</dt>
-            <dd className="text-sm text-gray-200 font-medium">{value ?? "—"}</dd>
-          </div>
-        ))}
-      </dl>
-    </div>
-  );
-}
-
-function ActivityFeed({ activity, profiles }) {
-  return (
-    <div className="bg-gray-800 rounded-xl p-5 mb-6">
-      <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">
-        Activity
-      </h3>
-      {activity.length === 0 ? (
-        <p className="text-sm text-gray-500 text-center py-4">No activity yet</p>
-      ) : (
-        <div className="space-y-3">
-          {activity.map((a) => {
-            const p      = a.author_id ? profiles[a.author_id] : null;
-            const author = p ? (p.display_name ?? p.full_name) : "System";
-            return (
-              <div key={a.id} className="flex gap-3">
-                <div className="w-1.5 h-1.5 rounded-full bg-blue-500 mt-2 flex-shrink-0" />
-                <div>
-                  <p className="text-sm text-gray-200">{a.body}</p>
-                  <p className="text-xs text-gray-500 mt-0.5">
-                    {author} · {fmt(a.created_at)}
-                  </p>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function NotesPanel({ notes, onSave, saving }) {
-  const [draft, setDraft] = useState(notes ?? "");
-  const dirty = draft !== (notes ?? "");
-  return (
-    <div className="bg-gray-800 rounded-xl p-5 mb-6">
-      <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">
-        Notes
-      </h3>
-      <textarea
-        className="w-full bg-gray-700 text-gray-200 rounded-lg p-3 text-sm resize-y min-h-[100px] focus:outline-none focus:ring-2 focus:ring-blue-500"
-        value={draft}
-        onChange={(e) => setDraft(e.target.value)}
-        placeholder="Add project notes…"
-      />
-      {dirty && (
-        <div className="flex justify-end mt-2">
-          <button
-            disabled={saving}
-            onClick={() => onSave(draft)}
-            className="px-4 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-sm rounded-lg transition-all disabled:opacity-50"
-          >
-            {saving ? "Saving…" : "Save Notes"}
-          </button>
-        </div>
-      )}
-    </div>
-  );
+function fmtBytes(b = 0) {
+  if (b < 1024) return `${b} B`
+  if (b < 1048576) return `${(b / 1024).toFixed(1)} KB`
+  return `${(b / 1048576).toFixed(1)} MB`
 }
 
 export default function ProjectDetail() {
-  const { id }                 = useParams();
-  const navigate               = useNavigate();
-  const { accounts, instance } = useMsal();
+  const { id }      = useParams()
+  const navigate    = useNavigate()
+  const { session } = useAuth()
+  const sp          = useSharePoint()
 
-  const [project,    setProject]    = useState(null);
-  const [milestones, setMilestones] = useState([]);
-  const [activity,   setActivity]   = useState([]);
-  const [profiles,   setProfiles]   = useState({});
-  const [loading,    setLoading]    = useState(true);
-  const [saving,     setSaving]     = useState(false);
-  const [toast,      setToast]      = useState(null);
+  const [project,    setProject]    = useState(null)
+  const [milestones, setMilestones] = useState([])
+  const [tasks,      setTasks]      = useState([])
+  const [loading,    setLoading]    = useState(true)
+  const [error,      setError]      = useState(null)
+  const [activeTab,  setActiveTab]  = useState('overview')
+  const [uploading,  setUploading]  = useState(false)
 
-  const showToast = (msg, type = "success") => {
-    setToast({ msg, type });
-    setTimeout(() => setToast(null), 3000);
-  };
-
-  const getToken = useCallback(async () => {
-    const r = await instance.acquireTokenSilent({
-      account: accounts[0],
-      scopes:  ["User.Read"],
-    });
-    return r.accessToken;
-  }, [accounts, instance]);
+  const proxy = useCallback(async (body) => {
+    if (!session?.access_token) throw new Error('No session')
+    const res = await fetch(PROXY_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${session.access_token}`,
+      },
+      body: JSON.stringify(body),
+    })
+    const json = await res.json()
+    if (!res.ok) throw new Error(json.error ?? `Proxy error ${res.status}`)
+    return json.data
+  }, [session])
 
   useEffect(() => {
-    async function load() {
-      setLoading(true);
+    if (!id || !session) return
+    ;(async () => {
+      setLoading(true)
+      setError(null)
       try {
-        const { data: proj, error: pErr } = await supabase
-          .from("projects").select("*").eq("id", id).single();
-        if (pErr) throw pErr;
-        setProject(proj);
+        const { data: proj, error: pe } = await supabase
+          .from('projects').select('*').eq('id', id).single()
+        if (pe) throw pe
+        setProject(proj)
 
-        const { data: ms } = await supabase
-          .from("project_milestones")
-          .select(`
-            id, value, milestone_def_id, updated_at,
-            definition:milestone_definitions ( id, label, sort_order, key )
-          `)
-          .eq("project_id", id)
-          .order("definition(sort_order)");
-        setMilestones(ms ?? []);
+        const { data: ms, error: mse } = await supabase
+          .from('project_milestones')
+          .select('*, milestone_definitions(name, description, phase, sort_order)')
+          .eq('project_id', id).order('created_at')
+        if (mse) throw mse
+        setMilestones(ms ?? [])
 
-        const { data: act } = await supabase
-          .from("project_activity")
-          .select("id, activity_type, body, created_at, author_id")
-          .eq("project_id", id)
-          .order("created_at", { ascending: false })
-          .limit(20);
-        setActivity(act ?? []);
+        const { data: tsk, error: te } = await supabase
+          .from('project_tasks')
+          .select('*, workflow_task_templates(title, phase, sort_order)')
+          .eq('project_id', id).order('created_at')
+        if (te) throw te
+        setTasks(tsk ?? [])
 
-        const { data: profs } = await supabase
-          .from("profiles").select("id, full_name, display_name");
-        if (profs) setProfiles(Object.fromEntries(profs.map((p) => [p.id, p])));
-      } catch (err) {
-        showToast(err.message, "error");
+        if (proj?.sharepoint_folder_id) {
+          sp.loadFolder(proj.sharepoint_folder_id)
+        }
+      } catch (e) {
+        setError(e.message)
       } finally {
-        setLoading(false);
+        setLoading(false)
       }
-    }
-    load();
-  }, [id]);
+    })()
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id, session])
 
-  async function handleStageChange(stage) {
-    setSaving(true);
+  async function toggleTask(task) {
+    const status = task.status === 'complete' ? 'pending' : 'complete'
+    const completed_at = status === 'complete' ? new Date().toISOString() : null
     try {
-      const token   = await getToken();
-      const updated = await proxyUpdateProject(id, { current_stage: stage }, token);
-      setProject(updated);
-      showToast(`Moved to Stage ${stage}`);
-    } catch (err) {
-      showToast(err.message, "error");
-    } finally {
-      setSaving(false);
+      await proxy({ action: 'update_task', taskId: task.id, updates: { status, completed_at } })
+      setTasks((prev) => prev.map((t) => t.id === task.id ? { ...t, status } : t))
+    } catch (e) {
+      console.error('Task toggle failed:', e.message)
     }
   }
 
-  // Milestone UPDATEs go direct — rows already exist from seed, temp RLS allows it
-  async function handleMilestoneChange(milestoneRowId, value) {
-    setSaving(true);
+  async function handleUpload(e) {
+    const file = e.target.files?.[0]
+    if (!file || !project?.sharepoint_folder_id) return
+    setUploading(true)
     try {
-      const { data, error } = await supabase
-        .from("project_milestones")
-        .update({ value, updated_at: new Date().toISOString() })
-        .eq("id", milestoneRowId)
-        .select("id, value")
-        .single();
-      if (error) throw error;
-      setMilestones((prev) =>
-        prev.map((m) => (m.id === milestoneRowId ? { ...m, value: data.value } : m))
-      );
+      await sp.uploadFile(project.sharepoint_folder_id, file)
     } catch (err) {
-      showToast(err.message, "error");
+      alert('Upload failed: ' + err.message)
     } finally {
-      setSaving(false);
+      setUploading(false)
+      e.target.value = ''
     }
   }
 
-  async function handleSaveNotes(notes) {
-    setSaving(true);
-    try {
-      const token   = await getToken();
-      const updated = await proxyUpdateProject(id, { notes }, token);
-      setProject(updated);
-      showToast("Notes saved");
-    } catch (err) {
-      showToast(err.message, "error");
-    } finally {
-      setSaving(false);
-    }
-  }
+  if (loading) return (
+    <div className="flex items-center justify-center h-64">
+      <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600" />
+    </div>
+  )
+  if (error)    return <div className="p-8 text-red-600 text-sm">Error: {error}</div>
+  if (!project) return <div className="p-8 text-gray-500 text-sm">Project not found.</div>
 
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center h-64">
-        <div className="w-8 h-8 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
-      </div>
-    );
-  }
-  if (!project) return null;
+  const doneTasks = tasks.filter((t) => t.status === 'complete').length
+  const doneMs    = milestones.filter((m) => m.status === 'complete').length
+  const tabs      = ['overview', 'milestones', 'tasks', 'documents']
 
   return (
-    <div className="max-w-4xl mx-auto p-4 sm:p-6">
-      {toast && (
-        <div className={[
-          "fixed top-4 right-4 z-50 px-4 py-2 rounded-lg text-sm font-medium shadow-lg",
-          toast.type === "error" ? "bg-red-600 text-white" : "bg-green-600 text-white",
-        ].join(" ")}>{toast.msg}</div>
+    <div className="max-w-5xl mx-auto px-4 py-8">
+      <div className="mb-6">
+        <button onClick={() => navigate('/projects')}
+          className="text-sm text-gray-400 hover:text-gray-600 mb-4 flex items-center gap-1">
+          ← All Projects
+        </button>
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div>
+            <h1 className="text-2xl font-bold text-gray-900">
+              {project.project_number} — {project.address}
+            </h1>
+            <p className="text-gray-500 mt-1">{project.client_name}</p>
+          </div>
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className={`px-3 py-1 rounded-full text-sm font-medium capitalize ${STATUS_COLORS[project.status] ?? 'bg-gray-100 text-gray-700'}`}>
+              {project.status}
+            </span>
+            {project.sharepoint_folder_url && (
+              <a href={project.sharepoint_folder_url} target="_blank" rel="noopener noreferrer"
+                className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-50 text-blue-700 rounded-lg text-sm font-medium hover:bg-blue-100 transition-colors">
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                    d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"/>
+                </svg>
+                SharePoint
+              </a>
+            )}
+          </div>
+        </div>
+        <div className="flex gap-5 mt-3 text-sm text-gray-500">
+          <span>{doneMs}/{milestones.length} milestones</span>
+          <span>{doneTasks}/{tasks.length} tasks</span>
+          {project.division && <span className="capitalize">{project.division}</span>}
+        </div>
+      </div>
+
+      <div className="border-b border-gray-200 mb-6">
+        <nav className="-mb-px flex gap-6">
+          {tabs.map((tab) => (
+            <button key={tab} onClick={() => setActiveTab(tab)}
+              className={`py-3 text-sm font-medium capitalize border-b-2 transition-colors ${
+                activeTab === tab
+                  ? 'border-blue-600 text-blue-600'
+                  : 'border-transparent text-gray-500 hover:text-gray-700'}`}>
+              {tab}
+              {tab === 'documents' && sp.files.length > 0 && (
+                <span className="ml-1.5 bg-gray-100 text-gray-600 text-xs px-1.5 py-0.5 rounded-full">
+                  {sp.files.length}
+                </span>
+              )}
+            </button>
+          ))}
+        </nav>
+      </div>
+
+      {activeTab === 'overview' && (
+        <div className="grid sm:grid-cols-2 gap-4">
+          {[
+            ['Project Number',    project.project_number],
+            ['Address',           project.address],
+            ['Client',            project.client_name],
+            ['Status',            project.status],
+            ['Division',          project.division],
+            ['Contract Value',    project.contract_value ? `$${Number(project.contract_value).toLocaleString()}` : null],
+            ['Start Date',        project.start_date ? new Date(project.start_date).toLocaleDateString() : null],
+            ['Target Completion', project.target_completion ? new Date(project.target_completion).toLocaleDateString() : null],
+          ].map(([label, value]) => (
+            <div key={label} className="bg-white rounded-lg border border-gray-200 p-4">
+              <p className="text-xs text-gray-400 uppercase tracking-wide mb-1">{label}</p>
+              <p className="text-sm font-medium text-gray-900">{value ?? '—'}</p>
+            </div>
+          ))}
+          {project.notes && (
+            <div className="sm:col-span-2 bg-white rounded-lg border border-gray-200 p-4">
+              <p className="text-xs text-gray-400 uppercase tracking-wide mb-1">Notes</p>
+              <p className="text-sm text-gray-700 whitespace-pre-wrap">{project.notes}</p>
+            </div>
+          )}
+        </div>
       )}
 
-      <div className="flex items-start gap-4 mb-6">
-        <button
-          onClick={() => navigate("/projects")}
-          className="text-gray-400 hover:text-white mt-1 transition-colors"
-        >
-          ← Back
-        </button>
-        <div className="flex-1">
-          <div className="flex items-center gap-3 flex-wrap">
-            <h1 className="text-2xl font-bold text-white">{project.project_address}</h1>
-            <span className={[
-              "px-2 py-0.5 rounded-full text-xs font-semibold uppercase",
-              project.division === "ira"
-                ? "bg-purple-700 text-purple-200"
-                : "bg-blue-700 text-blue-200",
-            ].join(" ")}>{project.division}</span>
-          </div>
-          <p className="text-gray-400 text-sm mt-0.5">
-            {project.project_number && `#${project.project_number} · `}
-            {project.status}
-          </p>
+      {activeTab === 'milestones' && (
+        <div className="space-y-3">
+          {milestones.length === 0 && <p className="text-sm text-gray-500">No milestones yet.</p>}
+          {milestones.map((ms) => (
+            <div key={ms.id} className="bg-white rounded-lg border border-gray-200 p-4 flex items-start gap-3">
+              <div className={`mt-1 w-3 h-3 rounded-full flex-shrink-0 ${
+                ms.status === 'complete' ? 'bg-green-500' :
+                ms.status === 'in_progress' ? 'bg-blue-500' : 'bg-gray-300'}`} />
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-medium text-gray-900">
+                  {ms.milestone_definitions?.name ?? ms.name ?? 'Milestone'}
+                </p>
+                {ms.milestone_definitions?.description && (
+                  <p className="text-xs text-gray-400 mt-0.5">{ms.milestone_definitions.description}</p>
+                )}
+                {ms.target_date && (
+                  <p className="text-xs text-gray-400 mt-1">Target: {new Date(ms.target_date).toLocaleDateString()}</p>
+                )}
+              </div>
+              <span className={`text-xs px-2 py-0.5 rounded-full capitalize ${
+                ms.status === 'complete' ? 'bg-green-100 text-green-700' :
+                ms.status === 'in_progress' ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-600'}`}>
+                {ms.status ?? 'pending'}
+              </span>
+            </div>
+          ))}
         </div>
-      </div>
+      )}
 
-      <StageTracker
-        currentStage={project.current_stage ?? 1}
-        onStageChange={handleStageChange}
-        disabled={saving}
-      />
+      {activeTab === 'tasks' && (
+        <div className="space-y-2">
+          {tasks.length === 0 && <p className="text-sm text-gray-500">No tasks yet.</p>}
+          {tasks.map((task) => (
+            <label key={task.id}
+              className="flex items-start gap-3 bg-white rounded-lg border border-gray-200 p-3.5 cursor-pointer hover:bg-gray-50 transition-colors">
+              <input type="checkbox"
+                checked={task.status === 'complete'}
+                onChange={() => toggleTask(task)}
+                className="mt-0.5 rounded border-gray-300 text-blue-600 focus:ring-blue-500" />
+              <div className="flex-1 min-w-0">
+                <p className={`text-sm font-medium ${task.status === 'complete' ? 'line-through text-gray-400' : 'text-gray-900'}`}>
+                  {task.workflow_task_templates?.title ?? task.title ?? 'Task'}
+                </p>
+                {task.workflow_task_templates?.phase && (
+                  <p className="text-xs text-gray-400 mt-0.5">{task.workflow_task_templates.phase}</p>
+                )}
+              </div>
+            </label>
+          ))}
+        </div>
+      )}
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+      {activeTab === 'documents' && (
         <div>
-          <InfoGrid project={project} profiles={profiles} />
-          <NotesPanel notes={project.notes} onSave={handleSaveNotes} saving={saving} />
-          <ActivityFeed activity={activity} profiles={profiles} />
+          {!project.sharepoint_folder_url ? (
+            <div className="text-center py-16 text-gray-400">
+              <p className="text-2xl mb-2">📁</p>
+              <p className="text-sm font-medium text-gray-600">No SharePoint folder linked</p>
+              <p className="text-xs mt-1">Folders are created automatically on new projects.</p>
+              {!sp.configured && (
+                <p className="text-xs mt-2 text-amber-600">VITE_SP_SITE_ID not configured.</p>
+              )}
+            </div>
+          ) : (
+            <>
+              <div className="flex items-center justify-between mb-4">
+                <a href={project.sharepoint_folder_url} target="_blank" rel="noopener noreferrer"
+                  className="text-sm text-blue-600 hover:underline">
+                  Open in SharePoint ↗
+                </a>
+                <label className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium cursor-pointer transition-colors ${
+                  uploading ? 'bg-gray-200 text-gray-500 cursor-wait' : 'bg-blue-600 text-white hover:bg-blue-700'}`}>
+                  {uploading ? 'Uploading…' : '+ Upload File'}
+                  <input type="file" className="hidden" onChange={handleUpload} disabled={uploading} />
+                </label>
+              </div>
+              {sp.error && <p className="text-sm text-red-500 mb-3">SharePoint error: {sp.error}</p>}
+              {sp.loading ? (
+                <div className="flex items-center justify-center py-12">
+                  <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600" />
+                </div>
+              ) : sp.files.length === 0 ? (
+                <p className="text-sm text-gray-500 text-center py-8">Folder is empty. Upload a file to get started.</p>
+              ) : (
+                <div className="space-y-1.5">
+                  {sp.files.map((file) => (
+                    <a key={file.id} href={file.webUrl} target="_blank" rel="noopener noreferrer"
+                      className="flex items-center gap-3 p-3 bg-white rounded-lg border border-gray-200 hover:bg-gray-50 transition-colors">
+                      <span className="text-xl flex-shrink-0">
+                        {file.isFolder ? '📁' : fileIcon(file.name)}
+                      </span>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-medium text-gray-900 truncate">{file.name}</p>
+                        <p className="text-xs text-gray-400">
+                          {file.lastModified ? new Date(file.lastModified).toLocaleDateString() : ''}
+                          {file.size ? ` · ${fmtBytes(file.size)}` : ''}
+                          {file.createdBy ? ` · ${file.createdBy}` : ''}
+                        </p>
+                      </div>
+                    </a>
+                  ))}
+                </div>
+              )}
+            </>
+          )}
         </div>
-        <div>
-          <MilestonePanel
-            milestones={milestones}
-            onValueChange={handleMilestoneChange}
-            saving={saving}
-          />
-        </div>
-      </div>
+      )}
     </div>
-  );
+  )
 }
