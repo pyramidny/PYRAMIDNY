@@ -18,26 +18,16 @@ export function AuthProvider({ children }) {
   }
 
   useEffect(() => {
-    // On /auth/callback, skip the initial getSession() call entirely.
-    // AuthCallback owns the exchange there. If we also call getSession()
-    // at the same time, both compete for the same Supabase Web Lock and
-    // one kills the other — causing the "lock was stolen" error and a
-    // failed exchange. Let onAuthStateChange handle the session update
-    // once AuthCallback completes the exchange.
-    const onCallbackPage = window.location.pathname === '/auth/callback'
-
-    if (!onCallbackPage) {
-      supabase.auth.getSession().then(({ data: { session } }) => {
-        setSession(session)
-        if (session?.user) loadProfile(session.user.id)
-        setLoading(false)
-      })
-    }
+    // Initial session check — lock bypass in supabase.js ensures this
+    // does not conflict with AuthCallback or onAuthStateChange
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setSession(session)
+      if (session?.user) loadProfile(session.user.id)
+      setLoading(false)
+    })
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (_event, session) => {
-        // Hold ProtectedRoute while session propagates
-        setLoading(true)
         setSession(session)
         if (session?.user) {
           await loadProfile(session.user.id)
