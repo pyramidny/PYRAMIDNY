@@ -61,9 +61,9 @@ export function AuthCallback() {
                   borderTop: '3px solid #f97316', borderRadius: '50%',
                   animation: 'spin 0.8s linear infinite',
         }} />
-                <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>style>
-              <p style={{ margin: 0, fontSize: '0.9rem' }}>Signing you in…</p>p>
-              <p style={{ margin: 0, fontSize: '0.7rem', opacity: 0.4 }}>{status}</p>p>
-        </div>div>
+                <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+              <p style={{ margin: 0, fontSize: '0.9rem' }}>Signing you in…</p>
+              <p style={{ margin: 0, fontSize: '0.7rem', opacity: 0.4 }}>{status}</p>
+        </div>
       )
 }</style>
