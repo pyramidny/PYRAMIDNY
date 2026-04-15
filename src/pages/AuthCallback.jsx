@@ -7,40 +7,40 @@ export function AuthCallback() {
   const navigate = useNavigate()
 
   useEffect(() => {
-    // Supabase automatically detects ?code= and calls exchangeCodeForSession
-    // internally via detectSessionInUrl. We just wait for the SIGNED_IN event.
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      (event, session) => {
-        if (event === 'SIGNED_IN' && session) {
-          subscription.unsubscribe()
+    const run = async () => {
+      try {
+        const url = window.location.href
+
+        // Check if there's already a valid session (e.g. page refresh)
+        const { data: { session: existing } } = await supabase.auth.getSession()
+        if (existing) {
           navigate('/dashboard', { replace: true })
+          return
         }
-        if (event === 'TOKEN_REFRESHED' && session) {
-          subscription.unsubscribe()
+
+        // Exchange the PKCE code for a session — we own this call
+        const { data, error } = await supabase.auth.exchangeCodeForSession(url)
+
+        if (error) {
+          console.error('[AuthCallback] exchange failed:', error.message)
+          setStatus('Sign in failed — redirecting...')
+          setTimeout(() => navigate('/login', { replace: true }), 2000)
+          return
+        }
+
+        if (data?.session) {
           navigate('/dashboard', { replace: true })
+        } else {
+          setStatus('No session returned — redirecting...')
+          setTimeout(() => navigate('/login', { replace: true }), 2000)
         }
+      } catch (e) {
+        console.error('[AuthCallback] unexpected:', e)
+        navigate('/login', { replace: true })
       }
-    )
-
-    // Also check if session already exists (handles page refresh case)
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      if (session) {
-        subscription.unsubscribe()
-        navigate('/dashboard', { replace: true })
-      }
-    })
-
-    // Fallback — if nothing happens in 10s, go to login
-    const timeout = setTimeout(() => {
-      subscription.unsubscribe()
-      setStatus('Sign in timed out. Redirecting...')
-      setTimeout(() => navigate('/login', { replace: true }), 1500)
-    }, 10000)
-
-    return () => {
-      subscription.unsubscribe()
-      clearTimeout(timeout)
     }
+
+    run()
   }, [navigate])
 
   return (
