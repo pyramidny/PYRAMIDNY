@@ -1,122 +1,197 @@
-// supabase/functions/project-proxy/index.ts
-// Service-role Edge Function — lets Azure AD users write to projects table.
-// Azure AD PKCE tokens are signed by Microsoft, not Supabase, so PostgREST
-// treats every request as anon. This function:
-//   1. Extracts caller email from the Azure AD JWT
-//   2. Verifies email is in staff_whitelist
-//   3. Uses service_role key to execute the DB operation
-//
-// Deploy: supabase functions deploy project-proxy --project-ref izjaxmcdlsdkdliqjlei
-
+import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
-const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
-const SERVICE_KEY  = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+const SUPABASE_URL              = Deno.env.get("SUPABASE_URL")!;
+const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+const SP_SITE_ID                = Deno.env.get("SP_SITE_ID") ?? "";
+const SP_DRIVE_ID               = Deno.env.get("SP_DRIVE_ID") ?? "";
+const SP_CONTACTS_LIST_ID       = Deno.env.get("SP_CONTACTS_LIST_ID") ?? "";
+const GRAPH_BASE                = "https://graph.microsoft.com/v1.0";
 
-const corsHeaders = {
+const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
+
+const cors = {
   "Access-Control-Allow-Origin":  "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
-  "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
 
-function parseJwtPayload(token: string) {
+// ── Helpers ─────────────────────────────────────────────────────────────────
+
+function sanitizeFolderName(projectNumber: string, address: string): string {
+  return `${projectNumber}_${address}`
+    .replace(/[<>:"/\\|?*\x00-\x1f]/g, "_")
+    .replace(/\s+/g, "_")
+    .replace(/_+/g, "_")
+    .replace(/^_|_$/g, "")
+    .substring(0, 240);
+}
+
+async function createSharePointFolder(
+  token: string,
+  folderName: string,
+): Promise<{ id: string; webUrl: string } | null> {
+  if (!SP_SITE_ID || !SP_DRIVE_ID) {
+    console.warn("SP_SITE_ID or SP_DRIVE_ID not set — skipping folder creation");
+    return null;
+  }
   try {
-    const b64 = token.split(".")[1].replace(/-/g, "+").replace(/_/g, "/");
-    return JSON.parse(atob(b64));
+    const res = await fetch(
+      `${GRAPH_BASE}/sites/${SP_SITE_ID}/drives/${SP_DRIVE_ID}/root/children`,
+      {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: folderName,
+          folder: {},
+          "@microsoft.graph.conflictBehavior": "rename",
+        }),
+      },
+    );
+    if (!res.ok) {
+      const err = await res.json();
+      console.error("SP folder error:", err?.error?.message);
+      return null; // non-fatal
+    }
+    const d = await res.json();
+    return { id: d.id, webUrl: d.webUrl };
+  } catch (e) {
+    console.error("SP folder fetch threw:", e);
+    return null;
+  }
+}
+
+async function createSharePointContact(
+  token: string,
+  fields: Record<string, string>,
+): Promise<string | null> {
+  if (!SP_SITE_ID || !SP_CONTACTS_LIST_ID) return null;
+  try {
+    const res = await fetch(
+      `${GRAPH_BASE}/sites/${SP_SITE_ID}/lists/${SP_CONTACTS_LIST_ID}/items`,
+      {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ fields }),
+      },
+    );
+    if (!res.ok) return null;
+    const d = await res.json();
+    return d.id ?? null;
   } catch {
     return null;
   }
 }
 
-function json(body: unknown, status = 200) {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: { ...corsHeaders, "Content-Type": "application/json" },
-  });
-}
+// ── Main handler ─────────────────────────────────────────────────────────────
 
-Deno.serve(async (req) => {
-  if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
-  if (req.method !== "POST") return json({ error: "Method not allowed" }, 405);
+serve(async (req) => {
+  if (req.method === "OPTIONS") return new Response("ok", { headers: cors });
 
-  // 1. Extract caller email from Azure AD JWT
-  const token = (req.headers.get("authorization") ?? "").replace(/^Bearer\s+/i, "");
-  if (!token) return json({ error: "Missing authorization header" }, 401);
+  const json = (data: unknown, status = 200) =>
+    new Response(JSON.stringify(data), {
+      status,
+      headers: { ...cors, "Content-Type": "application/json" },
+    });
 
-  const payload = parseJwtPayload(token);
-  if (!payload) return json({ error: "Invalid token" }, 401);
-
-  const callerEmail: string = (
-    payload.preferred_username ?? payload.upn ?? payload.email ?? ""
-  ).toLowerCase();
-  if (!callerEmail) return json({ error: "Cannot determine caller email from token" }, 401);
-
-  // 2. Parse request body
-  let body: { action: string; table: string; data?: Record<string, unknown>; id?: string };
   try {
-    body = await req.json();
-  } catch {
-    return json({ error: "Invalid JSON body" }, 400);
-  }
+    // Verify caller is an authenticated Supabase user
+    const authHeader = req.headers.get("Authorization") ?? "";
+    const jwt = authHeader.replace("Bearer ", "").trim();
+    if (!jwt) return json({ error: "No authorization header" }, 401);
 
-  const { action, table } = body;
-  const ALLOWED_TABLES = ["projects", "project_tasks"];
-  if (!ALLOWED_TABLES.includes(table)) {
-    return json({ error: `Table '${table}' not allowed via proxy` }, 403);
-  }
+    const { data: { user }, error: authError } = await supabase.auth.getUser(jwt);
+    if (authError || !user) return json({ error: "Unauthorized" }, 401);
 
-  // 3. Verify caller is in staff_whitelist
-  const admin = createClient(SUPABASE_URL, SERVICE_KEY);
+    const body = await req.json();
+    const { action, project, projectId, updates, taskId, providerToken } = body;
 
-  const { data: whitelisted, error: wlErr } = await admin
-    .from("staff_whitelist")
-    .select("email, role")
-    .eq("email", callerEmail)
-    .maybeSingle();
-
-  if (wlErr) return json({ error: "Whitelist lookup failed" }, 500);
-  if (!whitelisted) return json({ error: "Not authorized" }, 403);
-
-  // Resolve profile id for created_by / updated_by fields
-  const { data: profile } = await admin
-    .from("profiles")
-    .select("id")
-    .eq("email", callerEmail)
-    .maybeSingle();
-
-  const profileId: string | null = profile?.id ?? null;
-
-  // 4. Execute action
-  try {
-    if (action === "insert" && table === "projects") {
-      const { data, error } = await admin
+    // ── INSERT PROJECT ──────────────────────────────────────────────────────
+    if (action === "insert") {
+      const { data: newProject, error: insertErr } = await supabase
         .from("projects")
-        .insert({
-          ...body.data,
-          created_by: profileId,
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-        })
+        .insert({ ...project, created_by: user.id })
         .select()
         .single();
-      if (error) return json({ error: error.message }, 500);
+
+      if (insertErr) return json({ error: insertErr.message }, 400);
+
+      // SharePoint folder creation — non-fatal
+      if (providerToken && newProject) {
+        const folderName = sanitizeFolderName(
+          newProject.project_number ?? String(newProject.id),
+          newProject.address ?? "No_Address",
+        );
+
+        const folder = await createSharePointFolder(providerToken, folderName);
+
+        if (folder) {
+          // Create SP contact list item in parallel
+          const listItemId = await createSharePointContact(providerToken, {
+            Title:         newProject.client_name ?? "",
+            ProjectNumber: newProject.project_number ?? "",
+            Address:       newProject.address ?? "",
+            FolderURL:     folder.webUrl,
+          });
+
+          const spUpdate: Record<string, string | null> = {
+            sharepoint_folder_id:  folder.id,
+            sharepoint_folder_url: folder.webUrl,
+          };
+          if (listItemId) spUpdate.sharepoint_list_item_id = listItemId;
+
+          await supabase.from("projects").update(spUpdate).eq("id", newProject.id);
+
+          Object.assign(newProject, spUpdate);
+        }
+      }
+
+      return json({ data: newProject });
+    }
+
+    // ── UPDATE PROJECT ──────────────────────────────────────────────────────
+    if (action === "update") {
+      if (!projectId) return json({ error: "projectId required" }, 400);
+      const { data, error } = await supabase
+        .from("projects")
+        .update({ ...updates, updated_at: new Date().toISOString() })
+        .eq("id", projectId)
+        .select()
+        .single();
+      if (error) return json({ error: error.message }, 400);
       return json({ data });
     }
 
-    if (action === "update" && table === "projects") {
-      if (!body.id) return json({ error: "id required for update" }, 400);
-      const { data, error } = await admin
-        .from("projects")
-        .update({ ...body.data, updated_at: new Date().toISOString() })
-        .eq("id", body.id)
+    // ── UPDATE TASK ─────────────────────────────────────────────────────────
+    if (action === "update_task") {
+      if (!taskId) return json({ error: "taskId required" }, 400);
+      const { data, error } = await supabase
+        .from("project_tasks")
+        .update({ ...updates, updated_at: new Date().toISOString() })
+        .eq("id", taskId)
         .select()
         .single();
-      if (error) return json({ error: error.message }, 500);
+      if (error) return json({ error: error.message }, 400);
       return json({ data });
     }
 
-    return json({ error: `Unknown action '${action}'` }, 400);
-  } catch (err) {
-    return json({ error: String(err) }, 500);
+    // ── SELECT PROJECTS ─────────────────────────────────────────────────────
+    // Use this only if direct reads fail due to RLS / anon role issue
+    if (action === "select") {
+      const { data, error } = await supabase
+        .from("projects")
+        .select("*")
+        .order("created_at", { ascending: false });
+      if (error) return json({ error: error.message }, 400);
+      return json({ data });
+    }
+
+    return json({ error: `Unknown action: ${action}` }, 400);
+
+  } catch (e) {
+    console.error("project-proxy unhandled:", e);
+    return new Response(JSON.stringify({ error: String(e) }), {
+      status: 500,
+      headers: { ...cors, "Content-Type": "application/json" },
+    });
   }
 });
