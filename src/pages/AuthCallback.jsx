@@ -1,78 +1,69 @@
-import { injectAccessToken } from '@/lib/supabase'
+import { supabase } from '@/lib/supabase'
 import { useEffect, useState } from 'react'
-
-const STORAGE_KEY = 'sb-izjaxmcdlsdkdliqjlei-auth-token'
-
-function getStoredSession() {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY)
-    if (!raw) return null
-    const parsed = JSON.parse(raw)
-    return parsed?.access_token ? parsed : null
-  } catch {
-    return null
-  }
-}
+import { useNavigate } from 'react-router-dom'
 
 export function AuthCallback() {
-  const [status, setStatus] = useState('Checking localStorage...')
+    const [status, setStatus] = useState('Completing sign in…')
+    const navigate = useNavigate()
 
   useEffect(() => {
-    let attempts = 0
+        const handleCallback = async () => {
+                try {
+                          // PKCE: exchange the ?code= in the URL for a real session
+                  const { data, error } = await supabase.auth.exchangeCodeForSession(
+                              window.location.href
+                            )
 
-    const poll = setInterval(() => {
-      attempts++
-      const session = getStoredSession()
-      const msg = `Attempt ${attempts}: token=${!!session}`
-      console.log('[AuthCallback]', msg)
-      setStatus(msg)
+                  if (error) {
+                              console.error('[AuthCallback] exchange error:', error.message)
+                              setStatus(`Error: ${error.message}`)
+                              setTimeout(() => navigate('/login', { replace: true }), 3000)
+                              return
+                  }
 
-      if (session) {
-        clearInterval(poll)
-        console.log('[AuthCallback] session found, injecting into Supabase client...')
+                  if (data?.session) {
+                              console.log('[AuthCallback] session established, going to dashboard')
+                              navigate('/dashboard', { replace: true })
+                  } else {
+                              // Supabase sometimes handles it via onAuthStateChange — wait briefly
+                            setStatus('Waiting for session…')
+                              const { data: { subscription } } = supabase.auth.onAuthStateChange(
+                                            (_event, session) => {
+                                                            if (session) {
+                                                                              subscription.unsubscribe()
+                                                                              navigate('/dashboard', { replace: true })
+                                                            }
+                                            }
+                                          )
+                              // Fallback: if still nothing after 8s, send to login
+                            setTimeout(() => {
+                                          subscription.unsubscribe()
+                                          navigate('/login', { replace: true })
+                            }, 8000)
+                  }
+                } catch (e) {
+                          console.error('[AuthCallback] unexpected error:', e)
+                          navigate('/login', { replace: true })
+                }
+        }
 
-        // Inject the token into the already-initialized Supabase client
-        // so all subsequent requests go out with Bearer <token>
-        injectAccessToken(session.access_token)
-
-        console.log('[AuthCallback] token injected, redirecting to dashboard')
-        window.location.replace('/dashboard')
-        return
-      }
-
-      if (attempts >= 30) {
-        clearInterval(poll)
-        setStatus('Timed out after 15s — check console')
-        console.log('[AuthCallback] timed out, localStorage keys:', Object.keys(localStorage))
-      }
-    }, 500)
-
-    return () => clearInterval(poll)
-  }, [])
+                handleCallback()
+  }, [navigate])
 
   return (
-    <div style={{
-      display: 'flex',
-      flexDirection: 'column',
-      alignItems: 'center',
-      justifyContent: 'center',
-      height: '100vh',
-      backgroundColor: '#0f172a',
-      color: '#94a3b8',
-      fontFamily: 'system-ui, sans-serif',
-      gap: '1rem',
-    }}>
-      <div style={{
-        width: '40px',
-        height: '40px',
-        border: '3px solid #334155',
-        borderTop: '3px solid #f97316',
-        borderRadius: '50%',
-        animation: 'spin 0.8s linear infinite',
-      }} />
-      <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
-      <p style={{ margin: 0, fontSize: '0.9rem' }}>Signing you in…</p>
-      <p style={{ margin: 0, fontSize: '0.7rem', opacity: 0.4 }}>{status}</p>
-    </div>
-  )
-}
+        <div style={{
+                display: 'flex', flexDirection: 'column', alignItems: 'center',
+                justifyContent: 'center', height: '100vh', backgroundColor: '#0f172a',
+                color: '#94a3b8', fontFamily: 'system-ui, sans-serif', gap: '1rem',
+        }}>
+                <div style={{
+                  width: '40px', height: '40px', border: '3px solid #334155',
+                  borderTop: '3px solid #f97316', borderRadius: '50%',
+                  animation: 'spin 0.8s linear infinite',
+        }} />
+                <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>style>
+              <p style={{ margin: 0, fontSize: '0.9rem' }}>Signing you in…</p>p>
+              <p style={{ margin: 0, fontSize: '0.7rem', opacity: 0.4 }}>{status}</p>p>
+        </div>div>
+      )
+}</style>
