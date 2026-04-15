@@ -16,11 +16,15 @@ export default function App() {
   const { loading } = useAuth()
   const location = useLocation()
 
-  // Never block /auth/callback — it must mount immediately so the PKCE
-  // exchange runs before the one-time code expires. All other routes wait
-  // for auth state to resolve before rendering.
-  const isCallback = location.pathname === '/auth/callback'
+  // Supabase sometimes redirects ?code= to the root URL instead of /auth/callback.
+  // Catch it here and forward to the proper handler before anything else renders.
+  if (location.pathname === '/' && location.search.includes('code=')) {
+    return <Navigate to={`/auth/callback${location.search}`} replace />
+  }
 
+  // Never block /auth/callback with the loading gate — it must mount immediately
+  // so the PKCE exchange can run before the one-time code expires.
+  const isCallback = location.pathname === '/auth/callback'
   if (loading && !isCallback) return null
 
   return (
