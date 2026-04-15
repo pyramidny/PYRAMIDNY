@@ -5,24 +5,20 @@ import { AuthProvider } from '@/context/AuthContext'
 import App from './App'
 import './index.css'
 
+// StrictMode removed — it double-invokes effects which causes two simultaneous
+// Supabase auth lock acquisitions on /auth/callback, killing the PKCE exchange.
+
 // Unregister any previously installed service workers (VitePWA was removed).
-// Without this, old SW registrations can persist in browsers and intercept
-// Supabase auth requests, breaking the PKCE exchange.
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.getRegistrations().then(registrations => {
-    registrations.forEach(reg => {
-      reg.unregister()
-      console.log('[main] unregistered SW:', reg.scope)
-    })
+    registrations.forEach(reg => reg.unregister())
   })
 }
 
 ReactDOM.createRoot(document.getElementById('root')).render(
-  <React.StrictMode>
-    <BrowserRouter>
-      <AuthProvider>
-        <App />
-      </AuthProvider>
-    </BrowserRouter>
-  </React.StrictMode>
+  <BrowserRouter>
+    <AuthProvider>
+      <App />
+    </AuthProvider>
+  </BrowserRouter>
 )
