@@ -1,60 +1,50 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { supabase } from '@/lib/supabase'
 
+// With detectSessionInUrl:true and the lock bypass in supabase.js, Supabase
+// automatically exchanges the ?code= param when the client initializes —
+// no need to call exchangeCodeForSession manually. This component just waits
+// for the SIGNED_IN event to fire and then navigates to the dashboard.
+
 export function AuthCallback() {
-  const [status, setStatus] = useState('Completing sign in...')
   const navigate = useNavigate()
-  const ran = useRef(false)
 
   useEffect(() => {
-    const finishLogin = async () => {
-      // Guard: prevent double-fire (React effect timing, strict mode, etc.)
-      if (ran.current) return
-      ran.current = true
+    let sub = null
+    let timer = null
 
-      // Extract the code param — Supabase expects the CODE, not the full URL
-      const code = new URL(window.location.href).searchParams.get('code')
-      console.log('[auth/callback] code present?', !!code)
-
-      if (!code) {
-        // No code — might be a direct hit or refresh. Check for existing session.
-        const { data: { session } } = await supabase.auth.getSession()
-        console.log('[auth/callback] no code, existing session?', !!session)
-        if (session) {
-          navigate('/dashboard', { replace: true })
-        } else {
-          console.error('[auth/callback] no code and no session')
-          navigate('/login', { replace: true })
-        }
-        return
-      }
-
-      // Exchange the PKCE code for a session
-      const { data, error } = await supabase.auth.exchangeCodeForSession(code)
-      console.log('[auth/callback] exchange result', { session: !!data?.session, error })
-
-      if (error) {
-        console.error('[auth/callback] exchange failed', error.message)
-        setStatus('Sign in failed — ' + error.message)
-        setTimeout(() => navigate('/login', { replace: true }), 2500)
-        return
-      }
-
-      // Verify session is available immediately after exchange
-      const { data: { session } } = await supabase.auth.getSession()
-      console.log('[auth/callback] getSession after exchange:', !!session)
-
+    // Check if session already set (fast path — exchange already completed)
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      console.log('[auth/callback] getSession on mount:', !!session)
       if (session) {
         navigate('/dashboard', { replace: true })
-      } else {
-        console.error('[auth/callback] exchange succeeded but getSession returned null')
-        setStatus('Session error — redirecting...')
-        setTimeout(() => navigate('/login', { replace: true }), 2500)
+        return
       }
-    }
 
-    finishLogin()
+      // Session not ready yet — wait for SIGNED_IN event
+      const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+        console.log('[auth/callback] onAuthStateChange:', event, !!session)
+        if ((event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') && session) {
+          subscription.unsubscribe()
+          clearTimeout(timer)
+          navigate('/dashboard', { replace: true })
+        }
+      })
+      sub = subscription
+
+      // Safety fallback — 10s
+      timer = setTimeout(() => {
+        sub?.unsubscribe()
+        console.error('[auth/callback] timeout — no session after 10s')
+        navigate('/login', { replace: true })
+      }, 10000)
+    })
+
+    return () => {
+      sub?.unsubscribe()
+      clearTimeout(timer)
+    }
   }, [navigate])
 
   return (
@@ -62,7 +52,6 @@ export function AuthCallback() {
       <div style={{ width: 40, height: 40, border: '3px solid #334155', borderTop: '3px solid #f97316', borderRadius: '50%', animation: 'spin 0.8s linear infinite' }} />
       <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
       <p style={{ margin: 0, fontSize: '0.9rem' }}>Signing you in...</p>
-      <p style={{ margin: 0, fontSize: '0.7rem', opacity: 0.4 }}>{status}</p>
     </div>
   )
 }
