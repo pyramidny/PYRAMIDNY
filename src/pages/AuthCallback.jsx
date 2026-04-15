@@ -66,4 +66,4 @@ export function AuthCallback() {
               <p style={{ margin: 0, fontSize: '0.7rem', opacity: 0.4 }}>{status}</p>
         </div>
       )
-}</style>
+</style>
