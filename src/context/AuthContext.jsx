@@ -18,16 +18,25 @@ export function AuthProvider({ children }) {
   }
 
   useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setSession(session)
-      if (session?.user) loadProfile(session.user.id)
-      setLoading(false)
-    })
+    // On /auth/callback, skip the initial getSession() call entirely.
+    // AuthCallback owns the exchange there. If we also call getSession()
+    // at the same time, both compete for the same Supabase Web Lock and
+    // one kills the other — causing the "lock was stolen" error and a
+    // failed exchange. Let onAuthStateChange handle the session update
+    // once AuthCallback completes the exchange.
+    const onCallbackPage = window.location.pathname === '/auth/callback'
+
+    if (!onCallbackPage) {
+      supabase.auth.getSession().then(({ data: { session } }) => {
+        setSession(session)
+        if (session?.user) loadProfile(session.user.id)
+        setLoading(false)
+      })
+    }
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (_event, session) => {
-        // Set loading=true immediately so ProtectedRoute holds while
-        // the new session propagates — prevents the login bounce race condition
+        // Hold ProtectedRoute while session propagates
         setLoading(true)
         setSession(session)
         if (session?.user) {
@@ -43,10 +52,7 @@ export function AuthProvider({ children }) {
   }, [])
 
   async function signInWithMicrosoft() {
-    // Dynamically build redirectTo from the current origin so that
-    // app.pyramidny.com stays on app.pyramidny.com after login,
-    // and pyramidapp.netlify.app stays on pyramidapp.netlify.app.
-    const redirectBase = window.location.origin // e.g. https://app.pyramidny.com
+    const redirectBase = window.location.origin
     const { error } = await supabase.auth.signInWithOAuth({
       provider: 'azure',
       options: {
