@@ -17,10 +17,10 @@ import { Navigate, Route, Routes } from 'react-router-dom'
 export default function App() {
   const { loading } = useAuth()
 
-  if (window.location.pathname === '/auth/callback') {
+    if (window.location.pathname === '/auth/callback' || window.location.search.includes('code=')) {
     return (
       <Routes>
-        <Route path="/auth/callback" element={<AuthCallback />} />
+                  <Route path="*" element={<AuthCallback />} />
       </Routes>
     )
   }
