@@ -1,51 +1,39 @@
-import { useEffect } from 'react'
+import { useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { supabase } from '@/lib/supabase'
+import { useAuth } from '@/context/AuthContext'
 
-// With detectSessionInUrl:true and the lock bypass in supabase.js, Supabase
-// automatically exchanges the ?code= param when the client initializes —
-// no need to call exchangeCodeForSession manually. This component just waits
-// for the SIGNED_IN event to fire and then navigates to the dashboard.
+// AuthCallback — watches the session from AuthContext.
+// With detectSessionInUrl:true + lock bypass, Supabase auto-exchanges the
+// ?code= param and fires onAuthStateChange(SIGNED_IN) which sets session
+// in AuthContext. We just watch for it and navigate when it appears.
+// No manual exchangeCodeForSession needed — no lock conflicts possible.
 
 export function AuthCallback() {
   const navigate = useNavigate()
+  const { session } = useAuth()
+  const fallback = useRef(null)
 
   useEffect(() => {
-    let sub = null
-    let timer = null
-
-    // Check if session already set (fast path — exchange already completed)
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      console.log('[auth/callback] getSession on mount:', !!session)
-      if (session) {
-        navigate('/dashboard', { replace: true })
-        return
-      }
-
-      // Session not ready yet — wait for SIGNED_IN event
-      const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
-        console.log('[auth/callback] onAuthStateChange:', event, !!session)
-        if ((event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') && session) {
-          subscription.unsubscribe()
-          clearTimeout(timer)
-          navigate('/dashboard', { replace: true })
-        }
-      })
-      sub = subscription
-
-      // Safety fallback — 10s
-      timer = setTimeout(() => {
-        sub?.unsubscribe()
-        console.error('[auth/callback] timeout — no session after 10s')
-        navigate('/login', { replace: true })
-      }, 10000)
-    })
-
-    return () => {
-      sub?.unsubscribe()
-      clearTimeout(timer)
+    if (session) {
+      // Session is live — go to dashboard
+      clearTimeout(fallback.current)
+      console.log('[auth/callback] session found, navigating to dashboard')
+      navigate('/dashboard', { replace: true })
+      return
     }
-  }, [navigate])
+
+    // Session not yet available — start a fallback timer (first render only)
+    if (!fallback.current) {
+      console.log('[auth/callback] waiting for session...')
+      fallback.current = setTimeout(() => {
+        console.error('[auth/callback] no session after 12s — back to login')
+        navigate('/login', { replace: true })
+      }, 12000)
+    }
+  }, [session, navigate])
+
+  // Cleanup on unmount
+  useEffect(() => () => clearTimeout(fallback.current), [])
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100vh', background: '#0f172a', color: '#94a3b8', fontFamily: 'system-ui', gap: '1rem' }}>
