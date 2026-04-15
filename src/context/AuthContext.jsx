@@ -26,6 +26,9 @@ export function AuthProvider({ children }) {
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (_event, session) => {
+        // Set loading=true immediately so ProtectedRoute holds while
+        // the new session propagates — prevents the login bounce race condition
+        setLoading(true)
         setSession(session)
         if (session?.user) {
           await loadProfile(session.user.id)
@@ -43,8 +46,7 @@ export function AuthProvider({ children }) {
     // Dynamically build redirectTo from the current origin so that
     // app.pyramidny.com stays on app.pyramidny.com after login,
     // and pyramidapp.netlify.app stays on pyramidapp.netlify.app.
-    const redirectBase = window.location.origin  // e.g. https://app.pyramidny.com
-
+    const redirectBase = window.location.origin // e.g. https://app.pyramidny.com
     const { error } = await supabase.auth.signInWithOAuth({
       provider: 'azure',
       options: {
@@ -59,11 +61,11 @@ export function AuthProvider({ children }) {
     await supabase.auth.signOut()
   }
 
-  const isAdmin    = profile?.role === 'admin'
+  const isAdmin = profile?.role === 'admin'
   const isElevated = ['admin', 'director_of_operations'].includes(profile?.role)
-  const isPM       = ['admin', 'director_of_operations', 'project_manager', 'assistant_pm']
-                       .includes(profile?.role)
-  const division   = profile?.division ?? null
+  const isPM = ['admin', 'director_of_operations', 'project_manager', 'assistant_pm']
+    .includes(profile?.role)
+  const division = profile?.division ?? null
 
   const value = {
     session,
