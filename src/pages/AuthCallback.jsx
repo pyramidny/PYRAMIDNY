@@ -11,16 +11,15 @@ export function AuthCallback() {
       try {
         const url = window.location.href
 
-        // Check if there's already a valid session (e.g. page refresh)
+        // If already have a session, go straight to dashboard
         const { data: { session: existing } } = await supabase.auth.getSession()
         if (existing) {
           navigate('/dashboard', { replace: true })
           return
         }
 
-        // Exchange the PKCE code for a session — we own this call
-        const { data, error } = await supabase.auth.exchangeCodeForSession(url)
-
+        // Exchange PKCE code for session
+        const { error } = await supabase.auth.exchangeCodeForSession(url)
         if (error) {
           console.error('[AuthCallback] exchange failed:', error.message)
           setStatus('Sign in failed — redirecting...')
@@ -28,12 +27,22 @@ export function AuthCallback() {
           return
         }
 
-        if (data?.session) {
-          navigate('/dashboard', { replace: true })
-        } else {
-          setStatus('No session returned — redirecting...')
-          setTimeout(() => navigate('/login', { replace: true }), 2000)
-        }
+        // Wait for onAuthStateChange to confirm session is live in context
+        // This prevents the race where ProtectedRoute redirects to /login
+        // before AuthContext has propagated the new session
+        const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+          if (event === 'SIGNED_IN' && session) {
+            subscription.unsubscribe()
+            navigate('/dashboard', { replace: true })
+          }
+        })
+
+        // Safety fallback — if event doesn't fire within 5s
+        setTimeout(() => {
+          subscription.unsubscribe()
+          navigate('/login', { replace: true })
+        }, 5000)
+
       } catch (e) {
         console.error('[AuthCallback] unexpected:', e)
         navigate('/login', { replace: true })
