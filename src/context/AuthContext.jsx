@@ -1,4 +1,4 @@
-import { supabase } from '@/lib/supabase'
+himport { supabase } from '@/lib/supabase'
 import { createContext, useContext, useEffect, useState } from 'react'
 
 const AuthContext = createContext(null)
@@ -48,7 +48,7 @@ export function AuthProvider({ children }) {
     const { error } = await supabase.auth.signInWithOAuth({
       provider: 'azure',
       options: {
-        scopes: 'email profile openid',
+        scopes: 'email profile openid offline_access https://graph.microsoft.com/Sites.ReadWrite.All https://graph.microsoft.com/Files.ReadWrite',
         redirectTo: `${redirectBase}/auth/callback`,
       },
     })
