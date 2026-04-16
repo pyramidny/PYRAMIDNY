@@ -1,38 +1,34 @@
 import { useEffect, useRef } from 'react'
-import { useNavigate } from 'react-router-dom'
 import { useAuth } from '@/context/AuthContext'
 
-// AuthCallback — watches the session from AuthContext.
-// With detectSessionInUrl:true + lock bypass, Supabase auto-exchanges the
-// ?code= param and fires onAuthStateChange(SIGNED_IN) which sets session
-// in AuthContext. We just watch for it and navigate when it appears.
-// No manual exchangeCodeForSession needed — no lock conflicts possible.
+// AuthCallback — watches session from AuthContext.
+// Uses window.location.href (hard redirect) instead of React Router navigate()
+// to ensure a full page reload on the way to /dashboard. This guarantees the
+// Supabase client re-initializes with the stored session and all queries fire
+// correctly. Without the hard redirect, the SPA navigation leaves the client
+// in a partial state and the dashboard stalls until the user manually reloads.
 
 export function AuthCallback() {
-  const navigate = useNavigate()
   const { session } = useAuth()
   const fallback = useRef(null)
 
   useEffect(() => {
     if (session) {
-      // Session is live — go to dashboard
       clearTimeout(fallback.current)
-      console.log('[auth/callback] session found, navigating to dashboard')
-      navigate('/dashboard', { replace: true })
+      console.log('[auth/callback] session found — hard redirecting to dashboard')
+      window.location.href = '/dashboard'
       return
     }
 
-    // Session not yet available — start a fallback timer (first render only)
     if (!fallback.current) {
       console.log('[auth/callback] waiting for session...')
       fallback.current = setTimeout(() => {
         console.error('[auth/callback] no session after 12s — back to login')
-        navigate('/login', { replace: true })
+        window.location.href = '/login'
       }, 12000)
     }
-  }, [session, navigate])
+  }, [session])
 
-  // Cleanup on unmount
   useEffect(() => () => clearTimeout(fallback.current), [])
 
   return (
