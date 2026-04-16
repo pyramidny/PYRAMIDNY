@@ -5,20 +5,19 @@ import { useAuth } from '@/context/AuthContext'
 import { useSharePoint } from '@/hooks/useSharePoint'
 
 const PROXY_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/project-proxy`
+const SP_TOKEN_KEY = 'sb-izjaxmcdlsdkdliqjlei-auth-token'
 
 const STATUS_COLORS = {
-  active:    'bg-green-100 text-green-800',
-  pending:   'bg-yellow-100 text-yellow-800',
-  complete:  'bg-blue-100 text-blue-800',
-  on_hold:   'bg-gray-100 text-gray-700',
+  active: 'bg-green-100 text-green-800',
+  pending: 'bg-yellow-100 text-yellow-800',
+  complete: 'bg-blue-100 text-blue-800',
+  on_hold: 'bg-gray-100 text-gray-700',
   cancelled: 'bg-red-100 text-red-700',
 }
 
 function fileIcon(name = '') {
   const ext = name.split('.').pop()?.toLowerCase()
-  return { pdf:'PDF', doc:'DOC', docx:'DOCX', xls:'XLS', xlsx:'XLSX',
-           ppt:'PPT', pptx:'PPTX', jpg:'IMG', jpeg:'IMG', png:'IMG',
-           zip:'ZIP', mp4:'VID' }[ext] ?? 'FILE'
+  return { pdf:'PDF', doc:'DOC', docx:'DOCX', xls:'XLS', xlsx:'XLSX', ppt:'PPT', pptx:'PPTX', jpg:'IMG', jpeg:'IMG', png:'IMG', zip:'ZIP', mp4:'VID' }[ext] ?? 'FILE'
 }
 
 function fmtBytes(b = 0) {
@@ -28,38 +27,50 @@ function fmtBytes(b = 0) {
 }
 
 export default function ProjectDetail() {
-  const { id }    = useParams()
-  const navigate  = useNavigate()
+  const { id } = useParams()
+  const navigate = useNavigate()
   const { session } = useAuth()
-  const sp        = useSharePoint()
+  const sp = useSharePoint()
 
-  const [project,     setProject]     = useState(null)
-  const [milestones,  setMilestones]  = useState([])
-  const [tasks,       setTasks]       = useState([])
-  const [loading,     setLoading]     = useState(true)
-  const [error,       setError]       = useState(null)
-  const [activeTab,   setActiveTab]   = useState('overview')
-  const [uploading,   setUploading]   = useState(false)
-  const [staffPool,   setStaffPool]   = useState([])
+  const [project, setProject] = useState(null)
+  const [milestones, setMilestones] = useState([])
+  const [tasks, setTasks] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState(null)
+  const [activeTab, setActiveTab] = useState('overview')
+  const [uploading, setUploading] = useState(false)
+  const [staffPool, setStaffPool] = useState([])
   const [editingTeam, setEditingTeam] = useState(false)
-  const [teamDraft,   setTeamDraft]   = useState({ pm_id: null, assistant_pm_id: null })
+  const [teamDraft, setTeamDraft] = useState({ pm_id: null, assistant_pm_id: null })
+
+  // Read Azure AD token directly from localStorage — session.access_token is null
+  // for Microsoft-signed JWTs that Supabase cannot verify.
+  const getAccessToken = useCallback(() => {
+    try {
+      const raw = localStorage.getItem(SP_TOKEN_KEY)
+      return raw ? JSON.parse(raw)?.access_token : null
+    } catch {
+      return null
+    }
+  }, [])
 
   const proxy = useCallback(async (body) => {
+    const accessToken = getAccessToken()
     const res = await fetch(PROXY_URL, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        Authorization: `Bearer ${session.access_token}`,
+        Authorization: `Bearer ${accessToken}`,
       },
       body: JSON.stringify(body),
     })
     const json = await res.json()
     if (!res.ok) throw new Error(json.error ?? `Proxy error ${res.status}`)
     return json.data
-  }, [session])
+  }, [getAccessToken])
 
   useEffect(() => {
-    if (!id || !session) return
+    if (!id) return
     ;(async () => {
       setLoading(true)
       setError(null)
@@ -92,8 +103,8 @@ export default function ProjectDetail() {
         setLoading(false)
       }
     })()
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [id, session])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id])
 
   // Load seeded staff for team assignment
   useEffect(() => {
@@ -140,7 +151,7 @@ export default function ProjectDetail() {
   }
 
   if (loading) return <div className="p-8 text-center text-ink-500">Loading project...</div>
-  if (error)   return <div className="p-8 text-center text-red-600">Error: {error}</div>
+  if (error) return <div className="p-8 text-center text-red-600">Error: {error}</div>
   if (!project) return <div className="p-8 text-center text-ink-400">Project not found.</div>
 
   const TABS = ['overview', 'milestones', 'tasks', 'files']
@@ -185,42 +196,31 @@ export default function ProjectDetail() {
 
       {activeTab === 'overview' && (
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          {/* Status */}
           <div className="bg-white rounded-lg border border-gray-200 p-4">
             <p className="text-xs text-gray-400 uppercase tracking-wide mb-1">Status</p>
             <p className="text-sm font-medium text-gray-900 capitalize">{project.status ?? '-'}</p>
           </div>
-
-          {/* Division */}
           <div className="bg-white rounded-lg border border-gray-200 p-4">
             <p className="text-xs text-gray-400 uppercase tracking-wide mb-1">Division</p>
             <p className="text-sm font-medium text-gray-900 capitalize">{project.division ?? '-'}</p>
           </div>
-
-          {/* Current Stage */}
           <div className="bg-white rounded-lg border border-gray-200 p-4">
             <p className="text-xs text-gray-400 uppercase tracking-wide mb-1">Current Stage</p>
             <p className="text-sm font-medium text-gray-900">{project.current_stage ?? '-'}</p>
           </div>
-
-          {/* Project Number */}
           <div className="bg-white rounded-lg border border-gray-200 p-4">
             <p className="text-xs text-gray-400 uppercase tracking-wide mb-1">Project Number</p>
             <p className="text-sm font-medium text-gray-900">{project.project_number ?? '-'}</p>
           </div>
-
-          {/* Notes */}
           {project.notes && (
             <div className="sm:col-span-2 bg-white rounded-lg border border-gray-200 p-4">
               <p className="text-xs text-gray-400 uppercase tracking-wide mb-1">Notes</p>
               <p className="text-sm text-gray-700 whitespace-pre-wrap">{project.notes}</p>
             </div>
           )}
-
-          {/* Team Assignment */}
           <div className="sm:col-span-2 bg-white rounded-lg border border-gray-200 p-4">
             <div className="flex items-center justify-between mb-3">
-              <p className="text-xs text-gray-400 uppercase tracking-wide mb-1">Team</p>
+              <p className="text-xs text-gray-400 uppercase tracking-wide">Team</p>
               {!editingTeam ? (
                 <button
                   onClick={() => {
@@ -285,8 +285,8 @@ export default function ProjectDetail() {
           {milestones.map((ms) => (
             <div key={ms.id} className="bg-white rounded-lg border border-gray-200 p-4 flex items-start gap-3">
               <div className={`mt-1 w-3 h-3 rounded-full flex-shrink-0 ${
-                ms.status === 'complete' ? 'bg-green-500' :
-                ms.status === 'in_progress' ? 'bg-blue-500' : 'bg-gray-300'}`} />
+                ms.status === 'complete' ? 'bg-green-500' : ms.status === 'in_progress' ? 'bg-blue-500' : 'bg-gray-300'}`}
+              />
               <div className="flex-1 min-w-0">
                 <p className="text-sm font-medium text-gray-900">
                   {ms.milestone_definitions?.label ?? ms.milestone_definitions?.key ?? 'Milestone'}
@@ -299,8 +299,9 @@ export default function ProjectDetail() {
                 )}
               </div>
               <span className={`text-xs px-2 py-0.5 rounded-full capitalize ${
-                ms.status === 'complete' ? 'bg-green-100 text-green-700' :
-                ms.status === 'in_progress' ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-600'}`}>
+                ms.status === 'complete' ? 'bg-green-100 text-green-700'
+                : ms.status === 'in_progress' ? 'bg-blue-100 text-blue-700'
+                : 'bg-gray-100 text-gray-600'}`}>
                 {ms.status ?? 'pending'}
               </span>
             </div>
@@ -312,9 +313,9 @@ export default function ProjectDetail() {
         <div className="space-y-2">
           {tasks.length === 0 && <p className="text-sm text-gray-500">No tasks yet.</p>}
           {tasks.map((task) => (
-            <label key={task.id}
-              className="flex items-start gap-3 bg-white rounded-lg border border-gray-200 p-3.5 cursor-pointer hover:bg-gray-50 transition-colors">
-              <input type="checkbox"
+            <label key={task.id} className="flex items-start gap-3 bg-white rounded-lg border border-gray-200 p-3.5 cursor-pointer hover:bg-gray-50 transition-colors">
+              <input
+                type="checkbox"
                 checked={task.status === 'complete'}
                 onChange={() => toggleTask(task)}
                 className="mt-0.5 w-4 h-4 rounded border-gray-300 text-pyramid-500"
@@ -354,7 +355,8 @@ export default function ProjectDetail() {
           {sp.files.length > 0 && (
             <div className="space-y-2">
               {sp.files.map((file) => (
-                <a key={file.id}
+                <a
+                  key={file.id}
                   href={file.webUrl}
                   target="_blank"
                   rel="noopener noreferrer"
