@@ -78,7 +78,7 @@ export default function ProjectDetail() {
 
         const { data: tsk, error: te } = await supabase
           .from('project_tasks')
-          .select('*, workflow_task_templates(title, phase, sort_order)')
+          .select('*')
           .eq('project_id', id).order('created_at')
         if (te) throw te
         setTasks(tsk ?? [])
