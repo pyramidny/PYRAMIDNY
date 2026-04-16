@@ -123,7 +123,7 @@ export default function ProjectDetail() {
   }
 
   const toggleTask = async (task) => {
-    const newStatus = task.status === 'complete' ? 'pending' : 'complete'
+    const newStatus = task.status === 'completed' ? 'pending' : 'completed'
     // Optimistic update
     setTasks(ts => ts.map(t => t.id === task.id ? { ...t, status: newStatus } : t))
     try {
@@ -323,12 +323,12 @@ export default function ProjectDetail() {
             <label key={task.id} className="flex items-start gap-3 bg-white rounded-lg border border-gray-200 p-3.5 cursor-pointer hover:bg-gray-50 transition-colors">
               <input
                 type="checkbox"
-                checked={task.status === 'complete'}
+                checked={task.status === 'completed'}
                 onChange={() => toggleTask(task)}
                 className="mt-0.5 w-4 h-4 rounded border-gray-300 text-pyramid-500"
               />
               <div className="flex-1 min-w-0">
-                <p className={`text-sm ${task.status === 'complete' ? 'line-through text-gray-400' : 'text-gray-900'}`}>
+                <p className={`text-sm ${task.status === 'completed' ? 'line-through text-gray-400' : 'text-gray-900'}`}>
                   {task.task_name}
                 </p>
                 {task.due_date && (
