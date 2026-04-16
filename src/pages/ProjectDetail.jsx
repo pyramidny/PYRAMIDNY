@@ -124,8 +124,15 @@ export default function ProjectDetail() {
 
   const toggleTask = async (task) => {
     const newStatus = task.status === 'complete' ? 'pending' : 'complete'
-    await supabase.from('project_tasks').update({ status: newStatus }).eq('id', task.id)
+    // Optimistic update
     setTasks(ts => ts.map(t => t.id === task.id ? { ...t, status: newStatus } : t))
+    try {
+      await proxy({ action: 'update_task', taskId: task.id, updates: { status: newStatus } })
+    } catch (e) {
+      // Revert on failure
+      setTasks(ts => ts.map(t => t.id === task.id ? { ...t, status: task.status } : t))
+      alert('Failed to save task: ' + e.message)
+    }
   }
 
   const uploadFile = async (e) => {
