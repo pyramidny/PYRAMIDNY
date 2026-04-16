@@ -16,9 +16,9 @@ const STATUS_COLORS = {
 
 function fileIcon(name = '') {
   const ext = name.split('.').pop()?.toLowerCase()
-  return { pdf:'📄', doc:'📝', docx:'📝', xls:'📊', xlsx:'📊',
-           ppt:'📋', pptx:'📋', jpg:'🖼️', jpeg:'🖼️', png:'🖼️',
-           zip:'🗜️', mp4:'🎬' }[ext] ?? '📎'
+  return { pdf:'PDF', doc:'DOC', docx:'DOCX', xls:'XLS', xlsx:'XLSX',
+           ppt:'PPT', pptx:'PPTX', jpg:'IMG', jpeg:'IMG', png:'IMG',
+           zip:'ZIP', mp4:'VID' }[ext] ?? 'FILE'
 }
 
 function fmtBytes(b = 0) {
@@ -28,24 +28,23 @@ function fmtBytes(b = 0) {
 }
 
 export default function ProjectDetail() {
-  const { id }      = useParams()
-  const navigate    = useNavigate()
+  const { id }    = useParams()
+  const navigate  = useNavigate()
   const { session } = useAuth()
-  const sp          = useSharePoint()
+  const sp        = useSharePoint()
 
-  const [project,    setProject]    = useState(null)
-  const [milestones, setMilestones] = useState([])
-  const [tasks,      setTasks]      = useState([])
-  const [loading,    setLoading]    = useState(true)
-  const [error,      setError]      = useState(null)
-  const [activeTab,  setActiveTab]  = useState('overview')
-  const [uploading,  setUploading]  = useState(false)
-    const [staffPool,    setStaffPool]   = useState([])
-    const [editingTeam,  setEditingTeam] = useState(false)
-    const [teamDraft,    setTeamDraft]   = useState({ pm_id: null, assistant_pm_id: null })
+  const [project,     setProject]     = useState(null)
+  const [milestones,  setMilestones]  = useState([])
+  const [tasks,       setTasks]       = useState([])
+  const [loading,     setLoading]     = useState(true)
+  const [error,       setError]       = useState(null)
+  const [activeTab,   setActiveTab]   = useState('overview')
+  const [uploading,   setUploading]   = useState(false)
+  const [staffPool,   setStaffPool]   = useState([])
+  const [editingTeam, setEditingTeam] = useState(false)
+  const [teamDraft,   setTeamDraft]   = useState({ pm_id: null, assistant_pm_id: null })
 
   const proxy = useCallback(async (body) => {
-    if (!session?.access_token) throw new Error('No session')
     const res = await fetch(PROXY_URL, {
       method: 'POST',
       headers: {
@@ -96,188 +95,187 @@ export default function ProjectDetail() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id, session])
 
-    // Load seeded staff for team assignment
-    useEffect(() => {
-          supabase.from('profiles').select('id, full_name, role').eq('is_active', true)
-            .then(({ data }) => setStaffPool(data || []))
-    }, [])
+  // Load seeded staff for team assignment
+  useEffect(() => {
+    supabase.from('profiles').select('id, full_name, role').eq('is_active', true)
+      .then(({ data }) => setStaffPool(data || []))
+  }, [])
 
-    // Save PM / Asst PM assignment
-    const saveTeamAssignment = async () => {
-          try {
-                  await proxy({ action: 'update_project', projectId: id, updates: {
-                            pm_id: teamDraft.pm_id || null,
-                            assistant_pm_id: teamDraft.assistant_pm_id || null,
-                  }})
-                  setProject((p) => ({ ...p, pm_id: teamDraft.pm_id, assistant_pm_id: teamDraft.assistant_pm_id }))
-                  setEditingTeam(false)
-          } catch (e) { console.error('Team save failed:', e.message) }
-    }
-  
-
-  async function toggleTask(task) {
-    const status = task.status === 'complete' ? 'pending' : 'complete'
-    const completed_at = status === 'complete' ? new Date().toISOString() : null
+  const saveTeamAssignment = async () => {
     try {
-      await proxy({ action: 'update_task', taskId: task.id, updates: { status, completed_at } })
-      setTasks((prev) => prev.map((t) => t.id === task.id ? { ...t, status } : t))
+      await proxy({ action: 'update_project', id, ...teamDraft })
+      setProject(p => ({ ...p, ...teamDraft }))
+      setEditingTeam(false)
     } catch (e) {
-      console.error('Task toggle failed:', e.message)
+      alert('Failed to save: ' + e.message)
     }
   }
 
-  async function handleUpload(e) {
-    const file = e.target.files?.[0]
-    if (!file || !project?.sharepoint_folder_id) return
+  const toggleTask = async (task) => {
+    const newStatus = task.status === 'complete' ? 'pending' : 'complete'
+    await supabase.from('project_tasks').update({ status: newStatus }).eq('id', task.id)
+    setTasks(ts => ts.map(t => t.id === task.id ? { ...t, status: newStatus } : t))
+  }
+
+  const uploadFile = async (e) => {
+    if (!project?.sharepoint_folder_id) return
     setUploading(true)
     try {
-      await sp.uploadFile(project.sharepoint_folder_id, file)
+      const file = e.target.files[0]
+      if (!file) return
+      const buf = await file.arrayBuffer()
+      const b64 = btoa(String.fromCharCode(...new Uint8Array(buf)))
+      await proxy({
+        action: 'upload_file',
+        folderId: project.sharepoint_folder_id,
+        fileName: file.name,
+        fileContent: b64,
+      })
+      await sp.loadFolder(project.sharepoint_folder_id)
     } catch (err) {
       alert('Upload failed: ' + err.message)
     } finally {
       setUploading(false)
-      e.target.value = ''
     }
   }
 
-  if (loading) return (
-    <div className="flex items-center justify-center h-64">
-      <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600" />
-    </div>
-  )
-  if (error)    return <div className="p-8 text-red-600 text-sm">Error: {error}</div>
-  if (!project) return <div className="p-8 text-gray-500 text-sm">Project not found.</div>
+  if (loading) return <div className="p-8 text-center text-ink-500">Loading project...</div>
+  if (error)   return <div className="p-8 text-center text-red-600">Error: {error}</div>
+  if (!project) return <div className="p-8 text-center text-ink-400">Project not found.</div>
 
-  const doneTasks = tasks.filter((t) => t.status === 'complete').length
-  const doneMs    = milestones.filter((m) => m.status === 'complete').length
-  const tabs      = ['overview', 'milestones', 'tasks', 'documents']
+  const TABS = ['overview', 'milestones', 'tasks', 'files']
 
   return (
-    <div className="max-w-5xl mx-auto px-4 py-8">
-      <div className="mb-6">
-        <button onClick={() => navigate('/projects')}
-          className="text-sm text-gray-400 hover:text-gray-600 mb-4 flex items-center gap-1">
-          ← All Projects
-        </button>
-        <div className="flex flex-wrap items-start justify-between gap-4">
-          <div>
-            <h1 className="text-2xl font-bold text-gray-900">
-              {project.project_number} — {project.address}
-            </h1>
-            <p className="text-gray-500 mt-1">{project.client_name}</p>
-          </div>
-          <div className="flex items-center gap-2 flex-wrap">
-            <span className={`px-3 py-1 rounded-full text-sm font-medium capitalize ${STATUS_COLORS[project.status] ?? 'bg-gray-100 text-gray-700'}`}>
-              {project.status}
-            </span>
-            {project.sharepoint_folder_url && (
-              <a href={project.sharepoint_folder_url} target="_blank" rel="noopener noreferrer"
-                className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-50 text-blue-700 rounded-lg text-sm font-medium hover:bg-blue-100 transition-colors">
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-                    d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"/>
-                </svg>
-                SharePoint
-              </a>
-            )}
-          </div>
+    <div className="p-6 max-w-5xl mx-auto">
+      {/* Header */}
+      <div className="flex items-start justify-between mb-6">
+        <div>
+          <button
+            onClick={() => navigate('/projects')}
+            className="text-sm text-ink-400 hover:text-ink-700 mb-2 flex items-center gap-1"
+          >
+            Back to Projects
+          </button>
+          <h1 className="text-2xl font-bold text-ink-900">
+            {project.project_address ?? 'Untitled Project'}
+          </h1>
+          <p className="text-ink-500 text-sm mt-1">#{project.project_number}</p>
         </div>
-        <div className="flex gap-5 mt-3 text-sm text-gray-500">
-          <span>{doneMs}/{milestones.length} milestones</span>
-          <span>{doneTasks}/{tasks.length} tasks</span>
-          {project.division && <span className="capitalize">{project.division}</span>}
-        </div>
+        <span className={`px-3 py-1 rounded-full text-sm font-medium ${STATUS_COLORS[project.status] ?? 'bg-gray-100 text-gray-700'}`}>
+          {project.status ?? 'unknown'}
+        </span>
       </div>
 
-      <div className="border-b border-gray-200 mb-6">
-        <nav className="-mb-px flex gap-6">
-          {tabs.map((tab) => (
-            <button key={tab} onClick={() => setActiveTab(tab)}
-              className={`py-3 text-sm font-medium capitalize border-b-2 transition-colors ${
-                activeTab === tab
-                  ? 'border-blue-600 text-blue-600'
-                  : 'border-transparent text-gray-500 hover:text-gray-700'}`}>
-              {tab}
-              {tab === 'documents' && sp.files.length > 0 && (
-                <span className="ml-1.5 bg-gray-100 text-gray-600 text-xs px-1.5 py-0.5 rounded-full">
-                  {sp.files.length}
-                </span>
-              )}
-            </button>
-          ))}
-        </nav>
+      {/* Tabs */}
+      <div className="flex gap-1 border-b border-ink-200 mb-6">
+        {TABS.map(tab => (
+          <button
+            key={tab}
+            onClick={() => setActiveTab(tab)}
+            className={`px-4 py-2 text-sm font-medium capitalize border-b-2 -mb-px transition-colors ${
+              activeTab === tab
+                ? 'border-pyramid-500 text-pyramid-700'
+                : 'border-transparent text-ink-500 hover:text-ink-700'
+            }`}
+          >
+            {tab}
+          </button>
+        ))}
       </div>
 
       {activeTab === 'overview' && (
-        <div className="grid sm:grid-cols-2 gap-4">
-          {[
-            ['Project Number',    project.project_number],
-            ['Address',           project.address],
-            ['Client',            project.client_name],
-            ['Status',            project.status],
-            ['Division',          project.division],
-            ['Contract Value',    project.contract_value ? `$${Number(project.contract_value).toLocaleString()}` : null],
-            ['Start Date',        project.start_date ? new Date(project.start_date).toLocaleDateString() : null],
-            ['Target Completion', project.target_completion ? new Date(project.target_completion).toLocaleDateString() : null],
-          ].map(([label, value]) => (
-            <div key={label} className="bg-white rounded-lg border border-gray-200 p-4">
-              <p className="text-xs text-gray-400 uppercase tracking-wide mb-1">{label}</p>
-              <p className="text-sm font-medium text-gray-900">{value ?? '—'}</p>
-            </div>
-          ))}
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          {/* Status */}
+          <div className="bg-white rounded-lg border border-gray-200 p-4">
+            <p className="text-xs text-gray-400 uppercase tracking-wide mb-1">Status</p>
+            <p className="text-sm font-medium text-gray-900 capitalize">{project.status ?? '-'}</p>
+          </div>
+
+          {/* Division */}
+          <div className="bg-white rounded-lg border border-gray-200 p-4">
+            <p className="text-xs text-gray-400 uppercase tracking-wide mb-1">Division</p>
+            <p className="text-sm font-medium text-gray-900 capitalize">{project.division ?? '-'}</p>
+          </div>
+
+          {/* Current Stage */}
+          <div className="bg-white rounded-lg border border-gray-200 p-4">
+            <p className="text-xs text-gray-400 uppercase tracking-wide mb-1">Current Stage</p>
+            <p className="text-sm font-medium text-gray-900">{project.current_stage ?? '-'}</p>
+          </div>
+
+          {/* Project Number */}
+          <div className="bg-white rounded-lg border border-gray-200 p-4">
+            <p className="text-xs text-gray-400 uppercase tracking-wide mb-1">Project Number</p>
+            <p className="text-sm font-medium text-gray-900">{project.project_number ?? '-'}</p>
+          </div>
+
+          {/* Notes */}
           {project.notes && (
             <div className="sm:col-span-2 bg-white rounded-lg border border-gray-200 p-4">
               <p className="text-xs text-gray-400 uppercase tracking-wide mb-1">Notes</p>
               <p className="text-sm text-gray-700 whitespace-pre-wrap">{project.notes}</p>
             </div>
-            )}
-          {/* Team Assignment */}
-                  <div className="sm:col-span-2 bg-white rounded-lg border border-gray-200 p-4">
-                            <div className="flex items-center justify-between mb-3">
-                                        <p className="text-xs text-gray-400 uppercase tracking-wide mb-1">Team</p>
-                              {!editingTeam ? (
-                        <button onClick={() => { setTeamDraft({ pm_id: project.pm_id, assistant_pm_id: project.assistant_pm_id }); setEditingTeam(true) }}
-                                          className="text-xs text-blue-600 hover:text-blue-800">Edit</button>
-                      ) : (
-                        <div className="flex gap-2">
-                                        <button onClick={saveTeamAssignment} className="text-xs text-green-600 hover:text-green-800">Save</button>
-                                        <button onClick={() => setEditingTeam(false)} className="text-xs text-gray-400 hover:text-gray-600">Cancel</button>
-                        </div>
-                                        )}
-                            </div>
-                    {!editingTeam ? (
-                      <div className="grid grid-cols-2 gap-3">
-                                    <div>
-                                                    <p className="text-xs text-gray-400">Project Manager</p>
-                                                    <p className="text-sm font-medium text-gray-900">{staffPool.find((s) => s.id === project.pm_id)?.full_name ?? '--'}</p>
-                                    </div>
-                                    <div>
-                                                    <p className="text-xs text-gray-400">Assistant PM</p>
-                                                    <p className="text-sm font-medium text-gray-900">{staffPool.find((s) => s.id === project.assistant_pm_id)?.full_name ?? '--'}</p>
-                                    </div>
-                      </div>
-                    ) : (
-                      <div className="grid grid-cols-2 gap-3">
-                                    <div>
-                                                    <label className="text-xs text-gray-400 block mb-1">Project Manager</label>
-                                                    <select value={teamDraft.pm_id || ''} onChange={(e) => setTeamDraft((d) => ({ ...d, pm_id: e.target.value || null }))}
-                                                                        className="w-full border border-gray-200 rounded px-2 py-1 text-sm text-gray-900">
-                                                                      <option value="">-- None --</option>
-                                                      {staffPool.map((s) => <option key={s.id} value={s.id}>{s.full_name}</option>)}
-                                                    </select>
-                                    </div>
-                                    <div>
-                                                    <label className="text-xs text-gray-400 block mb-1">Assistant PM</label>
-                                                    <select value={teamDraft.assistant_pm_id || ''} onChange={(e) => setTeamDraft((d) => ({ ...d, assistant_pm_id: e.target.value || null }))}
-                                                                        className="w-full border border-gray-200 rounded px-2 py-1 text-sm text-gray-900">
-                                                                      <option value="">-- None --</option>
-                                                      {staffPool.map((s) => <option key={s.id} value={s.id}>{s.full_name}</option>)}
-                                                    </select>
-                                    </div>
-                      </div>
-                            )}
-                  </div></div>
           )}
+
+          {/* Team Assignment */}
+          <div className="sm:col-span-2 bg-white rounded-lg border border-gray-200 p-4">
+            <div className="flex items-center justify-between mb-3">
+              <p className="text-xs text-gray-400 uppercase tracking-wide mb-1">Team</p>
+              {!editingTeam ? (
+                <button
+                  onClick={() => {
+                    setTeamDraft({ pm_id: project.pm_id, assistant_pm_id: project.assistant_pm_id })
+                    setEditingTeam(true)
+                  }}
+                  className="text-xs text-blue-600 hover:text-blue-800"
+                >
+                  Edit
+                </button>
+              ) : (
+                <div className="flex gap-2">
+                  <button onClick={saveTeamAssignment} className="text-xs text-green-600 hover:text-green-800">Save</button>
+                  <button onClick={() => setEditingTeam(false)} className="text-xs text-gray-400 hover:text-gray-600">Cancel</button>
+                </div>
+              )}
+            </div>
+            {!editingTeam ? (
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <p className="text-xs text-gray-400">Project Manager</p>
+                  <p className="text-sm font-medium text-gray-900">{staffPool.find((s) => s.id === project.pm_id)?.full_name ?? '--'}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-gray-400">Assistant PM</p>
+                  <p className="text-sm font-medium text-gray-900">{staffPool.find((s) => s.id === project.assistant_pm_id)?.full_name ?? '--'}</p>
+                </div>
+              </div>
+            ) : (
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs text-gray-400 block mb-1">Project Manager</label>
+                  <select
+                    value={teamDraft.pm_id || ''}
+                    onChange={(e) => setTeamDraft((d) => ({ ...d, pm_id: e.target.value || null }))}
+                    className="w-full border border-gray-200 rounded px-2 py-1 text-sm text-gray-900"
+                  >
+                    <option value="">-- None --</option>
+                    {staffPool.map((s) => <option key={s.id} value={s.id}>{s.full_name}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="text-xs text-gray-400 block mb-1">Assistant PM</label>
+                  <select
+                    value={teamDraft.assistant_pm_id || ''}
+                    onChange={(e) => setTeamDraft((d) => ({ ...d, assistant_pm_id: e.target.value || null }))}
+                    className="w-full border border-gray-200 rounded px-2 py-1 text-sm text-gray-900"
+                  >
+                    <option value="">-- None --</option>
+                    {staffPool.map((s) => <option key={s.id} value={s.id}>{s.full_name}</option>)}
+                  </select>
+                </div>
+              </div>
+            )}
+          </div>
         </div>
       )}
 
@@ -319,13 +317,16 @@ export default function ProjectDetail() {
               <input type="checkbox"
                 checked={task.status === 'complete'}
                 onChange={() => toggleTask(task)}
-                className="mt-0.5 rounded border-gray-300 text-blue-600 focus:ring-blue-500" />
+                className="mt-0.5 w-4 h-4 rounded border-gray-300 text-pyramid-500"
+              />
               <div className="flex-1 min-w-0">
-                <p className={`text-sm font-medium ${task.status === 'complete' ? 'line-through text-gray-400' : 'text-gray-900'}`}>
-                  {task.workflow_task_templates?.title ?? task.title ?? 'Task'}
+                <p className={`text-sm ${task.status === 'complete' ? 'line-through text-gray-400' : 'text-gray-900'}`}>
+                  {task.task_name}
                 </p>
-                {task.workflow_task_templates?.phase && (
-                  <p className="text-xs text-gray-400 mt-0.5">{task.workflow_task_templates.phase}</p>
+                {task.due_date && (
+                  <p className="text-xs text-gray-400 mt-0.5">
+                    Due: {new Date(task.due_date).toLocaleDateString()}
+                  </p>
                 )}
               </div>
             </label>
@@ -333,60 +334,48 @@ export default function ProjectDetail() {
         </div>
       )}
 
-      {activeTab === 'documents' && (
-        <div>
-          {!project.sharepoint_folder_url ? (
-            <div className="text-center py-16 text-gray-400">
-              <p className="text-2xl mb-2">📁</p>
-              <p className="text-sm font-medium text-gray-600">No SharePoint folder linked</p>
-              <p className="text-xs mt-1">Folders are created automatically on new projects.</p>
-              {!sp.configured && (
-                <p className="text-xs mt-2 text-amber-600">VITE_SP_SITE_ID not configured.</p>
-              )}
-            </div>
-          ) : (
-            <>
-              <div className="flex items-center justify-between mb-4">
-                <a href={project.sharepoint_folder_url} target="_blank" rel="noopener noreferrer"
-                  className="text-sm text-blue-600 hover:underline">
-                  Open in SharePoint ↗
+      {activeTab === 'files' && (
+        <>
+          <div className="flex justify-between items-center mb-4">
+            <p className="text-sm text-gray-500">
+              {sp.files.length > 0 ? `${sp.files.length} file${sp.files.length !== 1 ? 's' : ''}` : 'No files yet'}
+            </p>
+            {project?.sharepoint_folder_id && (
+              <label className="cursor-pointer">
+                <input type="file" className="hidden" onChange={uploadFile} disabled={uploading} />
+                <span className="text-xs bg-pyramid-500 text-white px-3 py-1.5 rounded-lg hover:bg-pyramid-600 transition-colors">
+                  {uploading ? 'Uploading...' : 'Upload File'}
+                </span>
+              </label>
+            )}
+          </div>
+          {sp.loading && <p className="text-sm text-gray-400">Loading files...</p>}
+          {sp.error && <p className="text-sm text-red-500">Error: {sp.error}</p>}
+          {sp.files.length > 0 && (
+            <div className="space-y-2">
+              {sp.files.map((file) => (
+                <a key={file.id}
+                  href={file.webUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center gap-3 bg-white rounded-lg border border-gray-200 p-3 hover:bg-gray-50 transition-colors"
+                >
+                  <div className="w-8 h-8 rounded bg-pyramid-50 flex items-center justify-center text-xs font-bold text-pyramid-600 flex-shrink-0">
+                    {fileIcon(file.name)}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium text-gray-900 truncate">{file.name}</p>
+                    <p className="text-xs text-gray-400">
+                      {file.lastModified ? new Date(file.lastModified).toLocaleDateString() : ''}
+                      {file.size ? ` · ${fmtBytes(file.size)}` : ''}
+                      {file.createdBy ? ` · ${file.createdBy}` : ''}
+                    </p>
+                  </div>
                 </a>
-                <label className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium cursor-pointer transition-colors ${
-                  uploading ? 'bg-gray-200 text-gray-500 cursor-wait' : 'bg-blue-600 text-white hover:bg-blue-700'}`}>
-                  {uploading ? 'Uploading…' : '+ Upload File'}
-                  <input type="file" className="hidden" onChange={handleUpload} disabled={uploading} />
-                </label>
-              </div>
-              {sp.error && <p className="text-sm text-red-500 mb-3">SharePoint error: {sp.error}</p>}
-              {sp.loading ? (
-                <div className="flex items-center justify-center py-12">
-                  <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600" />
-                </div>
-              ) : sp.files.length === 0 ? (
-                <p className="text-sm text-gray-500 text-center py-8">Folder is empty. Upload a file to get started.</p>
-              ) : (
-                <div className="space-y-1.5">
-                  {sp.files.map((file) => (
-                    <a key={file.id} href={file.webUrl} target="_blank" rel="noopener noreferrer"
-                      className="flex items-center gap-3 p-3 bg-white rounded-lg border border-gray-200 hover:bg-gray-50 transition-colors">
-                      <span className="text-xl flex-shrink-0">
-                        {file.isFolder ? '📁' : fileIcon(file.name)}
-                      </span>
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm font-medium text-gray-900 truncate">{file.name}</p>
-                        <p className="text-xs text-gray-400">
-                          {file.lastModified ? new Date(file.lastModified).toLocaleDateString() : ''}
-                          {file.size ? ` · ${fmtBytes(file.size)}` : ''}
-                          {file.createdBy ? ` · ${file.createdBy}` : ''}
-                        </p>
-                      </div>
-                    </a>
-                  ))}
-                </div>
-              )}
-            </>
+              ))}
+            </div>
           )}
-        </div>
+        </>
       )}
     </div>
   )
