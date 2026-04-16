@@ -4,137 +4,208 @@ import { useAuth } from '@/context/AuthContext'
 
 const TABS = ['Profile', 'Notifications', 'System']
 
+const EVENT_TYPES = [
+  { key: 'notify_task_complete', label: 'Task Completed' },
+  { key: 'notify_milestone_reached', label: 'Milestone Reached' },
+  { key: 'notify_new_assignment', label: 'New Assignment' },
+  { key: 'notify_new_project', label: 'New Project' },
+  { key: 'notify_document_uploaded', label: 'Document Uploaded' },
+]
+
+const FREQUENCIES = [
+  { value: 'immediate', label: 'Immediate' },
+  { value: 'daily', label: 'Daily Digest' },
+  { value: 'weekly', label: 'Weekly Digest' },
+]
+
 export default function Settings() {
-    const { session } = useAuth()
-    const [activeTab, setActiveTab] = useState('Profile')
-    const [profile, setProfile] = useState(null)
-    const [notifSettings, setNotifSettings] = useState(null)
-    const [saving, setSaving] = useState(false)
-    const [saved, setSaved] = useState(false)
+  const { session } = useAuth()
+  const [activeTab, setActiveTab] = useState('Profile')
+  const [profile, setProfile] = useState(null)
+  const [prefs, setPrefs] = useState({
+    in_app: true,
+    email: true,
+    sms: false,
+    phone: '',
+    notify_task_complete: true,
+    notify_milestone_reached: true,
+    notify_new_assignment: true,
+    notify_new_project: true,
+    notify_document_uploaded: false,
+    frequency: 'immediate',
+  })
+  const [saving, setSaving] = useState(false)
+  const [saved, setSaved] = useState(false)
 
   useEffect(() => {
-        if (!session?.user?.id) return
-        supabase.from('profiles').select('*').eq('id', session.user.id).single()
-          .then(({ data }) => setProfile(data))
-        supabase.from('notification_settings').select('*').eq('user_id', session.user.id).single()
-          .then(({ data }) => {
-                    if (data) { setNotifSettings(data) } else {
-                                setNotifSettings({
-                                              user_id: session.user.id,
-                                              in_app: true, email: true, sms: false, phone: '',
-                                              notify_task_complete: true, notify_milestone_reached: true,
-                                              notify_new_assignment: true, notify_new_project: true,
-                                              notify_document_uploaded: false, frequency: 'immediate',
-                                })
-                    }
-          })
+    if (!session?.user?.id) return
+    supabase
+      .from('profiles')
+      .select('*')
+      .eq('id', session.user.id)
+      .single()
+      .then(({ data }) => { if (data) setProfile(data) })
+
+    supabase
+      .from('notification_settings')
+      .select('*')
+      .eq('user_id', session.user.id)
+      .maybeSingle()
+      .then(({ data }) => { if (data) setPrefs(p => ({ ...p, ...data })) })
   }, [session])
 
-  const saveNotifSettings = async () => {
-        if (!notifSettings) return
-        setSaving(true)
-        const { error } = await supabase.from('notification_settings')
-          .upsert({ ...notifSettings, updated_at: new Date().toISOString() }, { onConflict: 'user_id' })
-        setSaving(false)
-        if (!error) { setSaved(true); setTimeout(() => setSaved(false), 2500) }
+  const savePrefs = async () => {
+    setSaving(true)
+    await supabase
+      .from('notification_settings')
+      .upsert({ user_id: session.user.id, ...prefs }, { onConflict: 'user_id' })
+    setSaving(false)
+    setSaved(true)
+    setTimeout(() => setSaved(false), 2000)
   }
 
-  const toggle = (key) => setNotifSettings((prev) => ({ ...prev, [key]: !prev[key] }))
+  const toggle = (key) => setPrefs(p => ({ ...p, [key]: !p[key] }))
 
   return (
-        <div className="max-w-3xl mx-auto px-4 py-8">
-              <h1 className="font-condensed font-bold text-2xl text-ink-800 tracking-wide mb-6">Settings</h1>h1>
-              <div className="flex gap-1 border-b border-white/10 mb-8">
-                {TABS.map((t) => (
-                    <button key={t} onClick={() => setActiveTab(t)}
-                                  className={`px-5 py-2 text-sm font-medium rounded-t transition-colors ${activeTab === t ? 'bg-pyramid-500 text-white' : 'text-ink-400 hover:text-ink-200'}`}>
-                      {t}
-                    </button>button>
-                  ))}
-              </div>div>
-        
-          {activeTab === 'Profile' && profile && (
-                  <div className="space-y-4">
-                            <Field label="Full Name" value={profile.full_name} />
-                            <Field label="Display Name" value={profile.display_name || '--'} />
-                            <Field label="Email" value={profile.email} />
-                            <Field label="Role" value={profile.role} />
-                            <Field label="Division" value={profile.division || '--'} />
-                            <Field label="Phone" value={profile.phone || '--'} />
-                            <p className="text-ink-500 text-xs mt-4">To update your profile, contact your system administrator.</p>p>
-                  </div>div>
-              )}
-        
-          {activeTab === 'Notifications' && notifSettings && (
-                  <div className="space-y-8">
-                            <section>
-                                        <h2 className="text-sm font-semibold text-ink-400 uppercase tracking-widest mb-3">Channels</h2>h2>
-                                        <div className="space-y-3">
-                                                      <CheckRow label="In-App notifications" checked={notifSettings.in_app} onChange={() => toggle('in_app')} />
-                                                      <CheckRow label="Email notifications" checked={notifSettings.email} onChange={() => toggle('email')} />
-                                                      <div>
-                                                                      <CheckRow label="SMS notifications" checked={notifSettings.sms} onChange={() => toggle('sms')} />
-                                                        {notifSettings.sms && (
-                                      <input type="tel" placeholder="Mobile phone number" value={notifSettings.phone || ''}
-                                                            onChange={(e) => setNotifSettings((p) => ({ ...p, phone: e.target.value }))}
-                                                            className="mt-2 ml-7 w-64 bg-ink-900 border border-white/10 rounded px-3 py-1.5 text-sm text-ink-100 placeholder-ink-600 focus:outline-none focus:border-pyramid-500" />
-                                    )}
-                                                      </div>div>
-                                        </div>div>
-                            </section>section>
-                            <section>
-                                        <h2 className="text-sm font-semibold text-ink-400 uppercase tracking-widest mb-3">Notify me when</h2>h2>
-                                        <div className="space-y-3">
-                                                      <CheckRow label="A task is completed" checked={notifSettings.notify_task_complete} onChange={() => toggle('notify_task_complete')} />
-                                                      <CheckRow label="A milestone is reached" checked={notifSettings.notify_milestone_reached} onChange={() => toggle('notify_milestone_reached')} />
-                                                      <CheckRow label="I am assigned to a project or task" checked={notifSettings.notify_new_assignment} onChange={() => toggle('notify_new_assignment')} />
-                                                      <CheckRow label="A new project is created" checked={notifSettings.notify_new_project} onChange={() => toggle('notify_new_project')} />
-                                                      <CheckRow label="A document is uploaded" checked={notifSettings.notify_document_uploaded} onChange={() => toggle('notify_document_uploaded')} />
-                                        </div>div>
-                            </section>section>
-                            <section>
-                                        <h2 className="text-sm font-semibold text-ink-400 uppercase tracking-widest mb-3">Frequency</h2>h2>
-                                        <div className="flex gap-4">
-                                          {['immediate', 'daily', 'weekly'].map((f) => (
-                                    <label key={f} className="flex items-center gap-2 cursor-pointer">
-                                                      <input type="radio" name="frequency" value={f} checked={notifSettings.frequency === f}
-                                                                            onChange={() => setNotifSettings((p) => ({ ...p, frequency: f }))} className="accent-pyramid-500" />
-                                                      <span className="text-sm text-ink-200">{f === 'immediate' ? 'Immediate' : f === 'daily' ? 'Daily Digest' : 'Weekly Digest'}</span>span>
-                                    </label>label>
-                                  ))}
-                                        </div>div>
-                            </section>section>
-                            <button onClick={saveNotifSettings} disabled={saving}
-                                          className="px-6 py-2 bg-pyramid-500 hover:bg-pyramid-600 text-white text-sm font-medium rounded transition-colors disabled:opacity-50">
-                              {saving ? 'Saving...' : saved ? 'Saved' : 'Save Preferences'}
-                            </button>button>
-                  </div>div>
-              )}
-        
-          {activeTab === 'System' && (
-                  <div className="space-y-4 text-ink-400 text-sm">
-                            <p>Organization and system configuration options will appear here.</p>p>
-                            <div className="mt-6 p-4 rounded-lg border border-white/10 bg-ink-900 text-xs text-ink-500">Under Construction</div>div>
-                  </div>div>
-              )}
-        </div>div>
-      )
-}
+    <div className="p-6 max-w-2xl mx-auto">
+      <h1 className="text-2xl font-bold text-ink-900 mb-6">Settings</h1>
 
-function Field({ label, value }) {
-    return (
-          <div className="flex flex-col gap-1">
-                <span className="text-xs text-ink-500 uppercase tracking-widest">{label}</span>span>
-                <span className="text-ink-100 text-sm">{value}</span>span>
-          </div>div>
-        )
-}
+      <div className="flex gap-1 mb-6 bg-ink-100 rounded-lg p-1">
+        {TABS.map(tab => (
+          <button
+            key={tab}
+            onClick={() => setActiveTab(tab)}
+            className={"flex-1 py-2 px-4 rounded-md text-sm font-medium transition-colors " +
+              (activeTab === tab
+                ? "bg-white text-ink-900 shadow-sm"
+                : "text-ink-500 hover:text-ink-700")}
+          >
+            {tab}
+          </button>
+        ))}
+      </div>
 
-function CheckRow({ label, checked, onChange }) {
-    return (
-          <label className="flex items-center gap-3 cursor-pointer">
-                <input type="checkbox" checked={checked} onChange={onChange} className="w-4 h-4 rounded accent-pyramid-500" />
-                <span className="text-sm text-ink-200">{label}</span>span>
-          </label>label>
-        )
-}</div>
+      {activeTab === 'Profile' && (
+        <section className="bg-white rounded-xl border border-ink-200 p-6 space-y-4">
+          <h2 className="text-lg font-semibold text-ink-900">Profile Information</h2>
+          {profile ? (
+            <div className="space-y-3">
+              <div>
+                <p className="text-xs text-ink-500 uppercase tracking-wide">Full Name</p>
+                <p className="text-ink-900 font-medium">{profile.full_name || '-'}</p>
+              </div>
+              <div>
+                <p className="text-xs text-ink-500 uppercase tracking-wide">Email</p>
+                <p className="text-ink-900">{profile.email || session?.user?.email || '-'}</p>
+              </div>
+              <div>
+                <p className="text-xs text-ink-500 uppercase tracking-wide">Title</p>
+                <p className="text-ink-900">{profile.title || '-'}</p>
+              </div>
+              <div>
+                <p className="text-xs text-ink-500 uppercase tracking-wide">Division</p>
+                <p className="text-ink-900 capitalize">{profile.division || '-'}</p>
+              </div>
+              <div>
+                <p className="text-xs text-ink-500 uppercase tracking-wide">Role</p>
+                <p className="text-ink-900 capitalize">{profile.role || '-'}</p>
+              </div>
+              <p className="text-ink-500 text-xs mt-4">To update your profile, contact your system administrator.</p>
+            </div>
+          ) : (
+            <p className="text-ink-500 text-sm">Loading profile...</p>
+          )}
+        </section>
+      )}
+
+      {activeTab === 'Notifications' && (
+        <section className="space-y-4">
+          <div className="bg-white rounded-xl border border-ink-200 p-6">
+            <h2 className="text-lg font-semibold text-ink-900 mb-4">Notification Channels</h2>
+            <div className="space-y-3">
+              {[
+                { key: 'in_app', label: 'In-App Notifications' },
+                { key: 'email', label: 'Email Notifications' },
+                { key: 'sms', label: 'SMS Notifications' },
+              ].map(ch => (
+                <div key={ch.key}>
+                  <label className="flex items-center gap-3 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={prefs[ch.key]}
+                      onChange={() => toggle(ch.key)}
+                      className="w-4 h-4 rounded border-ink-300 text-pyramid-500"
+                    />
+                    <span className="text-ink-900 font-medium">{ch.label}</span>
+                  </label>
+                  {ch.key === 'sms' && prefs.sms && (
+                    <div className="mt-2 ml-7">
+                      <input
+                        type="tel"
+                        value={prefs.phone}
+                        onChange={e => setPrefs(p => ({ ...p, phone: e.target.value }))}
+                        placeholder="+1 (555) 000-0000"
+                        className="w-full border border-ink-300 rounded-lg px-3 py-2 text-sm text-ink-900 focus:outline-none focus:ring-2 focus:ring-pyramid-300"
+                      />
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div className="bg-white rounded-xl border border-ink-200 p-6">
+            <h2 className="text-lg font-semibold text-ink-900 mb-4">Notification Events</h2>
+            <div className="space-y-3">
+              {EVENT_TYPES.map(ev => (
+                <label key={ev.key} className="flex items-center gap-3 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={prefs[ev.key]}
+                    onChange={() => toggle(ev.key)}
+                    className="w-4 h-4 rounded border-ink-300 text-pyramid-500"
+                  />
+                  <span className="text-ink-900">{ev.label}</span>
+                </label>
+              ))}
+            </div>
+          </div>
+
+          <div className="bg-white rounded-xl border border-ink-200 p-6">
+            <h2 className="text-lg font-semibold text-ink-900 mb-4">Frequency</h2>
+            <div className="space-y-2">
+              {FREQUENCIES.map(f => (
+                <label key={f.value} className="flex items-center gap-3 cursor-pointer">
+                  <input
+                    type="radio"
+                    name="frequency"
+                    value={f.value}
+                    checked={prefs.frequency === f.value}
+                    onChange={() => setPrefs(p => ({ ...p, frequency: f.value }))}
+                    className="w-4 h-4 border-ink-300 text-pyramid-500"
+                  />
+                  <span className="text-ink-900">{f.label}</span>
+                </label>
+              ))}
+            </div>
+          </div>
+
+          <button
+            onClick={savePrefs}
+            disabled={saving}
+            className="w-full py-3 px-6 bg-pyramid-500 text-white font-semibold rounded-xl hover:bg-pyramid-600 disabled:opacity-50 transition-colors"
+          >
+            {saving ? 'Saving...' : saved ? 'Saved!' : 'Save Preferences'}
+          </button>
+        </section>
+      )}
+
+      {activeTab === 'System' && (
+        <section className="bg-white rounded-xl border border-ink-200 p-6">
+          <h2 className="text-lg font-semibold text-ink-900 mb-2">System Settings</h2>
+          <p className="text-ink-500 text-sm">System configuration options will appear here in a future update.</p>
+        </section>
+      )}
+    </div>
+  )
+}
