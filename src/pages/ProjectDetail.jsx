@@ -230,6 +230,7 @@ export default function ProjectDetail() {
               <p className="text-xs text-gray-400 uppercase tracking-wide mb-1">Notes</p>
               <p className="text-sm text-gray-700 whitespace-pre-wrap">{project.notes}</p>
             </div>
+            )}
           {/* Team Assignment */}
                   <div className="sm:col-span-2 bg-white rounded-lg border border-gray-200 p-4">
                             <div className="flex items-center justify-between mb-3">
