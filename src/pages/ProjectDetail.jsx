@@ -72,7 +72,7 @@ export default function ProjectDetail() {
         const { data: ms, error: mse } = await supabase
           .from('project_milestones')
           .select('*, milestone_definitions(label, key, sort_order, active_from_stage)')
-          .eq('project_id', id).order('created_at')
+          .eq('project_id', id).order('updated_at')
         if (mse) throw mse
         setMilestones(ms ?? [])
 
