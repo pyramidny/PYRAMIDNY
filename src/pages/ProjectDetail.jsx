@@ -12,7 +12,7 @@ const STATUS_COLORS = {
   complete:  'bg-blue-100 text-blue-800',
   on_hold:   'bg-gray-100 text-gray-700',
   cancelled: 'bg-red-100 text-red-700',
-}
+}h
 
 function fileIcon(name = '') {
   const ext = name.split('.').pop()?.toLowerCase()
@@ -72,7 +72,7 @@ export default function ProjectDetail() {
 
         const { data: ms, error: mse } = await supabase
           .from('project_milestones')
-          .select('*, milestone_definitions(name, description, phase, sort_order)')
+          .select('*, milestone_definitions(label, key, sort_order, active_from_stage)')
           .eq('project_id', id).order('created_at')
         if (mse) throw mse
         setMilestones(ms ?? [])
@@ -290,10 +290,10 @@ export default function ProjectDetail() {
                 ms.status === 'in_progress' ? 'bg-blue-500' : 'bg-gray-300'}`} />
               <div className="flex-1 min-w-0">
                 <p className="text-sm font-medium text-gray-900">
-                  {ms.milestone_definitions?.name ?? ms.name ?? 'Milestone'}
+                  {ms.milestone_definitions?.label ?? ms.milestone_definitions?.key ?? 'Milestone'}
                 </p>
-                {ms.milestone_definitions?.description && (
-                  <p className="text-xs text-gray-400 mt-0.5">{ms.milestone_definitions.description}</p>
+                {ms.milestone_definitions?.key && (
+                  <p className="text-xs text-gray-400 mt-0.5">{ms.milestone_definitions.key}</p>
                 )}
                 {ms.target_date && (
                   <p className="text-xs text-gray-400 mt-1">Target: {new Date(ms.target_date).toLocaleDateString()}</p>
