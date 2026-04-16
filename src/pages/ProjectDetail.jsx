@@ -12,7 +12,7 @@ const STATUS_COLORS = {
   complete:  'bg-blue-100 text-blue-800',
   on_hold:   'bg-gray-100 text-gray-700',
   cancelled: 'bg-red-100 text-red-700',
-}h
+}
 
 function fileIcon(name = '') {
   const ext = name.split('.').pop()?.toLowerCase()
