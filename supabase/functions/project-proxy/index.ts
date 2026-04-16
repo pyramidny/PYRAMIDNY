@@ -4,7 +4,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 const SUPABASE_URL              = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const SP_SITE_ID                = Deno.env.get("SP_SITE_ID") ?? "";
-const SP_DRIVE_ID               = Deno.env.get("SP_DRIVE_ID") ?? "";
+
 const SP_CONTACTS_LIST_ID       = Deno.env.get("SP_CONTACTS_LIST_ID") ?? "";
 const GRAPH_BASE                = "https://graph.microsoft.com/v1.0";
 
@@ -12,7 +12,7 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
 const cors = {
   "Access-Control-Allow-Origin":  "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",h
 };
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
@@ -30,13 +30,13 @@ async function createSharePointFolder(
   token: string,
   folderName: string,
 ): Promise<{ id: string; webUrl: string } | null> {
-  if (!SP_SITE_ID || !SP_DRIVE_ID) {
-    console.warn("SP_SITE_ID or SP_DRIVE_ID not set — skipping folder creation");
+    if (!SP_SITE_ID) {
+          console.warn("SP_SITE_ID not set - skipping folder creation");
     return null;
   }
   try {
     const res = await fetch(
-      `${GRAPH_BASE}/sites/${SP_SITE_ID}/drives/${SP_DRIVE_ID}/root/children`,
+              `${GRAPH_BASE}/sites/${SP_SITE_ID}/drive/root/children`,
       {
         method: "POST",
         headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
