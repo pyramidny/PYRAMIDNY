@@ -40,6 +40,9 @@ export default function ProjectDetail() {
   const [error,      setError]      = useState(null)
   const [activeTab,  setActiveTab]  = useState('overview')
   const [uploading,  setUploading]  = useState(false)
+    const [staffPool,    setStaffPool]   = useState([])
+    const [editingTeam,  setEditingTeam] = useState(false)
+    const [teamDraft,    setTeamDraft]   = useState({ pm_id: null, assistant_pm_id: null })
 
   const proxy = useCallback(async (body) => {
     if (!session?.access_token) throw new Error('No session')
@@ -92,6 +95,25 @@ export default function ProjectDetail() {
     })()
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id, session])
+
+    // Load seeded staff for team assignment
+    useEffect(() => {
+          supabase.from('profiles').select('id, full_name, role').eq('is_active', true)
+            .then(({ data }) => setStaffPool(data || []))
+    }, [])
+
+    // Save PM / Asst PM assignment
+    const saveTeamAssignment = async () => {
+          try {
+                  await proxy({ action: 'update_project', projectId: id, updates: {
+                            pm_id: teamDraft.pm_id || null,
+                            assistant_pm_id: teamDraft.assistant_pm_id || null,
+                  }})
+                  setProject((p) => ({ ...p, pm_id: teamDraft.pm_id, assistant_pm_id: teamDraft.assistant_pm_id }))
+                  setEditingTeam(false)
+          } catch (e) { console.error('Team save failed:', e.message) }
+    }
+  
 
   async function toggleTask(task) {
     const status = task.status === 'complete' ? 'pending' : 'complete'
@@ -208,6 +230,52 @@ export default function ProjectDetail() {
               <p className="text-xs text-gray-400 uppercase tracking-wide mb-1">Notes</p>
               <p className="text-sm text-gray-700 whitespace-pre-wrap">{project.notes}</p>
             </div>
+          {/* Team Assignment */}
+                  <div className="sm:col-span-2 bg-white rounded-lg border border-gray-200 p-4">
+                            <div className="flex items-center justify-between mb-3">
+                                        <p className="text-xs text-gray-400 uppercase tracking-wide mb-1">Team</p>p>
+                              {!editingTeam ? (
+                        <button onClick={() => { setTeamDraft({ pm_id: project.pm_id, assistant_pm_id: project.assistant_pm_id }); setEditingTeam(true) }}
+                                          className="text-xs text-blue-600 hover:text-blue-800">Edit</button>button>
+                      ) : (
+                        <div className="flex gap-2">
+                                        <button onClick={saveTeamAssignment} className="text-xs text-green-600 hover:text-green-800">Save</button>
+                                        <button onClick={() => setEditingTeam(false)} className="text-xs text-gray-400 hover:text-gray-600">Cancel</button>button>
+                        </div>div>
+                                        )}
+                            </div>div>
+                    {!editingTeam ? (
+                      <div className="grid grid-cols-2 gap-3">
+                                    <div>
+                                                    <p className="text-xs text-gray-400">Project Manager</p>p>
+                                                    <p className="text-sm font-medium text-gray-900">{staffPool.find((s) => s.id === project.pm_id)?.full_name ?? '--'}</p>p>
+                                    </div>div>
+                                    <div>
+                                                    <p className="text-xs text-gray-400">Assistant PM</p>p>
+                                                    <p className="text-sm font-medium text-gray-900">{staffPool.find((s) => s.id === project.assistant_pm_id)?.full_name ?? '--'}</p>p>
+                                    </div>div>
+                      </div>div>
+                    ) : (
+                      <div className="grid grid-cols-2 gap-3">
+                                    <div>
+                                                    <label className="text-xs text-gray-400 block mb-1">Project Manager</label>label>
+                                                    <select value={teamDraft.pm_id || ''} onChange={(e) => setTeamDraft((d) => ({ ...d, pm_id: e.target.value || null }))}
+                                                                        className="w-full border border-gray-200 rounded px-2 py-1 text-sm text-gray-900">
+                                                                      <option value="">-- None --</option>option>
+                                                      {staffPool.map((s) => <option key={s.id} value={s.id}>{s.full_name}</option>option>)}
+                                                    </select>select>
+                                    </div>div>
+                                    <div>
+                                                    <label className="text-xs text-gray-400 block mb-1">Assistant PM</label>label>
+                                                    <select value={teamDraft.assistant_pm_id || ''} onChange={(e) => setTeamDraft((d) => ({ ...d, assistant_pm_id: e.target.value || null }))}
+                                                                        className="w-full border border-gray-200 rounded px-2 py-1 text-sm text-gray-900">
+                                                                      <option value="">-- None --</option>option>
+                                                      {staffPool.map((s) => <option key={s.id} value={s.id}>{s.full_name}</option>option>)}
+                                                    </select>select>
+                                    </div>div>
+                      </div>div>
+                            )}
+                  </div>div></div>
           )}
         </div>
       )}
