@@ -2,7 +2,6 @@ import { useState, useEffect, useCallback } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/context/AuthContext'
-import { useSharePoint } from '@/hooks/useSharePoint'
 
 const PROXY_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/project-proxy`
 const SP_TOKEN_KEY = 'sb-izjaxmcdlsdkdliqjlei-auth-token'
@@ -51,19 +50,49 @@ function sortMilestones(list) {
   })
 }
 
+// Document categories — match the SharePoint subfolder tree
+const DOCUMENT_CATEGORIES = [
+  { value: 'Files/Contracts',        label: 'Contracts' },
+  { value: 'Files/Change_Orders',    label: 'Change Orders' },
+  { value: 'Files/Permits',          label: 'Permits' },
+  { value: 'Files/Insurance_COI_CCI', label: 'Insurance (COI/CCI)' },
+  { value: 'Files/Submittals',       label: 'Submittals' },
+  { value: 'Files/Plans_Drawings',   label: 'Plans & Drawings' },
+  { value: 'Files/Inspections',      label: 'Inspections' },
+  { value: 'Files/Correspondence',   label: 'Correspondence' },
+  { value: 'Files/Closeout',         label: 'Closeout' },
+  { value: 'Files/Other',            label: 'Other' },
+]
+
+const PHOTO_CATEGORIES = [
+  { value: 'Pictures/Before',         label: 'Before' },
+  { value: 'Pictures/Progress',       label: 'Progress' },
+  { value: 'Pictures/After',          label: 'After' },
+  { value: 'Pictures/Permits_Posted', label: 'Permits Posted' },
+  { value: 'Pictures/Damage',         label: 'Damage' },
+  { value: 'Pictures/Other',          label: 'Other' },
+]
+
+function isImageMime(mime = '') {
+  return mime.startsWith('image/')
+}
+
 export default function ProjectDetail() {
   const { id } = useParams()
   const navigate = useNavigate()
   const { session } = useAuth()
-  const sp = useSharePoint()
 
   const [project, setProject] = useState(null)
   const [milestones, setMilestones] = useState([])
   const [tasks, setTasks] = useState([])
+  const [documents, setDocuments] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
   const [activeTab, setActiveTab] = useState('overview')
   const [uploading, setUploading] = useState(false)
+  const [uploadCategory, setUploadCategory] = useState('Files/Other')
+  const [photoFilter, setPhotoFilter] = useState('all')
+  const [lightboxDoc, setLightboxDoc] = useState(null)
   const [staffPool, setStaffPool] = useState([])
   const [editingTeam, setEditingTeam] = useState(false)
   const [teamDraft, setTeamDraft] = useState({ pm_id: null, assistant_pm_id: null })
@@ -123,9 +152,15 @@ export default function ProjectDetail() {
         if (te) throw te
         setTasks(tsk ?? [])
 
-        if (proj?.sharepoint_folder_id) {
-          sp.loadFolder(proj.sharepoint_folder_id)
-        }
+        // Load documents from project_documents (excluding soft-deleted)
+        const { data: docs, error: de } = await supabase
+          .from('project_documents')
+          .select('*, uploader:profiles!uploaded_by(full_name, display_name)')
+          .eq('project_id', id)
+          .eq('is_deleted', false)
+          .order('uploaded_at', { ascending: false })
+        if (de) throw de
+        setDocuments(docs ?? [])
       } catch (e) {
         setError(e.message)
       } finally {
@@ -223,45 +258,46 @@ export default function ProjectDetail() {
     }
   }
 
-  const uploadFile = async (e) => {
+  const uploadFile = async (e, categoryOverride) => {
     if (!project?.id) return
     const file = e.target.files[0]
     if (!file) return
     setUploading(true)
     try {
-      // Read file → base64 in chunks. The naive
-      // `btoa(String.fromCharCode(...new Uint8Array(buf)))` approach
-      // hits "Maximum call stack size exceeded" for any file over ~100KB
-      // because the spread operator passes every byte as a separate argument.
+      // Chunked base64 encoding — avoids stack overflow on files over ~100KB
       const buf = await file.arrayBuffer()
       const bytes = new Uint8Array(buf)
-      const CHUNK = 0x8000 // 32KB per chunk — safely under JS argument limit
+      const CHUNK = 0x8000
       let binary = ''
       for (let i = 0; i < bytes.length; i += CHUNK) {
         binary += String.fromCharCode.apply(null, bytes.subarray(i, i + CHUNK))
       }
       const b64 = btoa(binary)
 
-      // Read the Microsoft Graph provider token so project-proxy can
-      // write to SharePoint. The proxy forwards it as the user's own token.
+      // Microsoft Graph provider token for SharePoint upload
       let providerToken = null
       try {
         const raw = localStorage.getItem(SP_TOKEN_KEY)
         providerToken = raw ? JSON.parse(raw)?.provider_token : null
       } catch { /* ignore */ }
 
-      await proxy({
+      const chosenCategory = categoryOverride ?? uploadCategory
+
+      const newDoc = await proxy({
         action: 'upload_file',
         projectId: project.id,
-        category: 'Files/Other',       // TODO Batch 2b: let user pick category
+        category: chosenCategory,
         fileName: file.name,
         fileContent: b64,
         document_type: null,
         providerToken,
       })
-      if (sp?.loadFolder && project.sharepoint_folder_id) {
-        await sp.loadFolder(project.sharepoint_folder_id)
-      }
+
+      // Prepend to list for immediate feedback
+      if (newDoc) setDocuments(prev => [newDoc, ...prev])
+
+      // Clear the file input so the same file can be uploaded again
+      e.target.value = ''
     } catch (err) {
       alert('Upload failed: ' + err.message)
     } finally {
@@ -269,11 +305,31 @@ export default function ProjectDetail() {
     }
   }
 
+  const deleteDocument = async (doc) => {
+    if (!confirm(`Delete "${doc.name}"? This will also remove it from SharePoint.`)) return
+
+    const prev = documents
+    setDocuments(ds => ds.filter(d => d.id !== doc.id))
+
+    let providerToken = null
+    try {
+      const raw = localStorage.getItem(SP_TOKEN_KEY)
+      providerToken = raw ? JSON.parse(raw)?.provider_token : null
+    } catch { /* ignore */ }
+
+    try {
+      await proxy({ action: 'delete_file', documentId: doc.id, providerToken })
+    } catch (err) {
+      setDocuments(prev)
+      alert('Delete failed: ' + err.message)
+    }
+  }
+
   if (loading) return <div className="p-8 text-center text-ink-500">Loading project...</div>
   if (error) return <div className="p-8 text-center text-red-600">Error: {error}</div>
   if (!project) return <div className="p-8 text-center text-ink-400">Project not found.</div>
 
-  const TABS = ['overview', 'milestones', 'tasks', 'files']
+  const TABS = ['overview', 'milestones', 'tasks', 'documents', 'photos']
 
   return (
     <div className="p-6 max-w-5xl mx-auto">
@@ -556,46 +612,262 @@ export default function ProjectDetail() {
         </div>
       )}
 
-      {activeTab === 'files' && (
+      {activeTab === 'documents' && (
         <>
-          <div className="flex justify-between items-center mb-4">
-            <p className="text-sm text-gray-500">
-              {sp.files.length > 0 ? `${sp.files.length} file${sp.files.length !== 1 ? 's' : ''}` : 'No files yet'}
-            </p>
-            {project?.sharepoint_folder_id && (
-              <label className="cursor-pointer">
-                <input type="file" className="hidden" onChange={uploadFile} disabled={uploading} />
-                <span className="text-xs bg-pyramid-500 text-white px-3 py-1.5 rounded-lg hover:bg-pyramid-600 transition-colors">
-                  {uploading ? 'Uploading...' : 'Upload File'}
-                </span>
-              </label>
-            )}
-          </div>
-          {sp.loading && <p className="text-sm text-gray-400">Loading files...</p>}
-          {sp.error && <p className="text-sm text-red-500">Error: {sp.error}</p>}
-          {sp.files.length > 0 && (
-            <div className="space-y-2">
-              {sp.files.map((file) => (
-                <a
-                  key={file.id}
-                  href={file.webUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="flex items-center gap-3 bg-white rounded-lg border border-gray-200 p-3 hover:bg-gray-50 transition-colors"
-                >
-                  <div className="w-8 h-8 rounded bg-pyramid-50 flex items-center justify-center text-xs font-bold text-pyramid-600 flex-shrink-0">
-                    {fileIcon(file.name)}
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium text-gray-900 truncate">{file.name}</p>
-                    <p className="text-xs text-gray-400">
-                      {file.lastModified ? new Date(file.lastModified).toLocaleDateString() : ''}
-                      {file.size ? ` · ${fmtBytes(file.size)}` : ''}
-                      {file.createdBy ? ` · ${file.createdBy}` : ''}
-                    </p>
-                  </div>
-                </a>
+          {/* Upload bar */}
+          <div className="flex flex-wrap items-center gap-2 mb-4 pb-4 border-b border-gray-200">
+            <select
+              value={uploadCategory}
+              onChange={(e) => setUploadCategory(e.target.value)}
+              disabled={uploading}
+              className="text-sm border border-gray-200 rounded px-2 py-1.5 text-gray-900 bg-white"
+            >
+              {DOCUMENT_CATEGORIES.map(c => (
+                <option key={c.value} value={c.value}>{c.label}</option>
               ))}
+            </select>
+
+            <label className={`cursor-pointer ${uploading ? 'opacity-60 cursor-wait' : ''}`}>
+              <input
+                type="file"
+                className="hidden"
+                onChange={(e) => uploadFile(e)}
+                disabled={uploading}
+              />
+              <span className="inline-block text-xs bg-pyramid-500 text-white px-3 py-1.5 rounded-lg hover:bg-pyramid-600 transition-colors">
+                {uploading ? 'Uploading...' : 'Upload to ' + (DOCUMENT_CATEGORIES.find(c => c.value === uploadCategory)?.label ?? 'Other')}
+              </span>
+            </label>
+
+            <span className="text-xs text-gray-400 ml-auto">
+              {documents.filter(d => d.category?.startsWith('Files/')).length} document{documents.filter(d => d.category?.startsWith('Files/')).length !== 1 ? 's' : ''}
+            </span>
+          </div>
+
+          {/* Grouped by category */}
+          {(() => {
+            const docs = documents.filter(d => d.category?.startsWith('Files/'))
+            if (docs.length === 0) {
+              return <p className="text-sm text-gray-500">No documents yet. Pick a category above and upload.</p>
+            }
+            return (
+              <div className="space-y-5">
+                {DOCUMENT_CATEGORIES.map(cat => {
+                  const group = docs.filter(d => d.category === cat.value)
+                  if (group.length === 0) return null
+                  return (
+                    <div key={cat.value}>
+                      <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">
+                        {cat.label} <span className="text-gray-400 font-normal">({group.length})</span>
+                      </h3>
+                      <div className="space-y-2">
+                        {group.map(doc => (
+                          <div
+                            key={doc.id}
+                            className="flex items-center gap-3 bg-white rounded-lg border border-gray-200 p-3 hover:bg-gray-50 transition-colors"
+                          >
+                            <div className="w-8 h-8 rounded bg-pyramid-50 flex items-center justify-center text-[10px] font-bold text-pyramid-600 flex-shrink-0">
+                              {fileIcon(doc.name)}
+                            </div>
+                            <a
+                              href={doc.sharepoint_url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="flex-1 min-w-0"
+                            >
+                              <p className="text-sm font-medium text-gray-900 truncate">{doc.name}</p>
+                              <p className="text-xs text-gray-400">
+                                {doc.uploaded_at ? new Date(doc.uploaded_at).toLocaleDateString() : ''}
+                                {doc.file_size_bytes ? ` · ${fmtBytes(doc.file_size_bytes)}` : ''}
+                                {(doc.uploader?.display_name ?? doc.uploader?.full_name)
+                                  ? ` · ${doc.uploader.display_name ?? doc.uploader.full_name}`
+                                  : ''}
+                              </p>
+                            </a>
+                            <button
+                              onClick={() => deleteDocument(doc)}
+                              className="text-xs text-red-500 hover:text-red-700 flex-shrink-0"
+                              title="Delete"
+                            >
+                              Delete
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            )
+          })()}
+        </>
+      )}
+
+      {activeTab === 'photos' && (
+        <>
+          {/* Upload bar + category filter */}
+          <div className="flex flex-wrap items-center gap-2 mb-4 pb-4 border-b border-gray-200">
+            <select
+              value={uploadCategory.startsWith('Pictures/') ? uploadCategory : 'Pictures/Progress'}
+              onChange={(e) => setUploadCategory(e.target.value)}
+              disabled={uploading}
+              className="text-sm border border-gray-200 rounded px-2 py-1.5 text-gray-900 bg-white"
+            >
+              {PHOTO_CATEGORIES.map(c => (
+                <option key={c.value} value={c.value}>{c.label}</option>
+              ))}
+            </select>
+
+            <label className={`cursor-pointer ${uploading ? 'opacity-60 cursor-wait' : ''}`}>
+              <input
+                type="file"
+                accept="image/*"
+                capture="environment"
+                className="hidden"
+                onChange={(e) => uploadFile(e, uploadCategory.startsWith('Pictures/') ? uploadCategory : 'Pictures/Progress')}
+                disabled={uploading}
+              />
+              <span className="inline-block text-xs bg-pyramid-500 text-white px-3 py-1.5 rounded-lg hover:bg-pyramid-600 transition-colors">
+                {uploading ? 'Uploading...' : '📷 Take / Upload Photo'}
+              </span>
+            </label>
+
+            <span className="text-xs text-gray-400 ml-auto">
+              {documents.filter(d => d.category?.startsWith('Pictures/')).length} photo{documents.filter(d => d.category?.startsWith('Pictures/')).length !== 1 ? 's' : ''}
+            </span>
+          </div>
+
+          {/* Category filter buttons */}
+          <div className="flex flex-wrap gap-1.5 mb-5">
+            <button
+              onClick={() => setPhotoFilter('all')}
+              className={`text-xs px-3 py-1 rounded-full border transition-colors ${
+                photoFilter === 'all'
+                  ? 'bg-pyramid-500 text-white border-pyramid-500'
+                  : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'
+              }`}
+            >
+              All
+            </button>
+            {PHOTO_CATEGORIES.map(cat => (
+              <button
+                key={cat.value}
+                onClick={() => setPhotoFilter(cat.value)}
+                className={`text-xs px-3 py-1 rounded-full border transition-colors ${
+                  photoFilter === cat.value
+                    ? 'bg-pyramid-500 text-white border-pyramid-500'
+                    : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'
+                }`}
+              >
+                {cat.label}
+              </button>
+            ))}
+          </div>
+
+          {/* Thumbnail grid */}
+          {(() => {
+            const photos = documents.filter(d =>
+              d.category?.startsWith('Pictures/') &&
+              (photoFilter === 'all' || d.category === photoFilter),
+            )
+            if (photos.length === 0) {
+              return (
+                <p className="text-sm text-gray-500">
+                  {photoFilter === 'all' ? 'No photos yet.' : 'No photos in this category.'}
+                </p>
+              )
+            }
+            return (
+              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
+                {photos.map(doc => (
+                  <div
+                    key={doc.id}
+                    className="relative group aspect-square bg-gray-100 rounded-lg overflow-hidden border border-gray-200"
+                  >
+                    {isImageMime(doc.mime_type) ? (
+                      // Clickable thumbnail (SharePoint webUrl opens in SP viewer)
+                      <button
+                        onClick={() => setLightboxDoc(doc)}
+                        className="absolute inset-0 w-full h-full flex items-center justify-center hover:opacity-90"
+                      >
+                        <div className="flex flex-col items-center gap-1 text-gray-500">
+                          <span className="text-2xl">🖼</span>
+                          <span className="text-[10px] text-gray-400">Click to view</span>
+                        </div>
+                      </button>
+                    ) : (
+                      <a
+                        href={doc.sharepoint_url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="absolute inset-0 w-full h-full flex items-center justify-center"
+                      >
+                        <div className="w-10 h-10 rounded bg-pyramid-50 flex items-center justify-center text-xs font-bold text-pyramid-600">
+                          {fileIcon(doc.name)}
+                        </div>
+                      </a>
+                    )}
+
+                    {/* Hover overlay */}
+                    <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/70 via-black/20 to-transparent p-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                      <p className="text-[10px] text-white truncate" title={doc.name}>{doc.name}</p>
+                      <p className="text-[9px] text-white/70">
+                        {doc.uploaded_at ? new Date(doc.uploaded_at).toLocaleDateString() : ''}
+                      </p>
+                    </div>
+
+                    {/* Delete button */}
+                    <button
+                      onClick={(e) => { e.stopPropagation(); deleteDocument(doc) }}
+                      className="absolute top-1 right-1 w-6 h-6 rounded-full bg-white/80 text-red-500 hover:bg-white hover:text-red-700 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center text-xs"
+                      title="Delete"
+                    >
+                      ×
+                    </button>
+
+                    {/* Category badge */}
+                    <span className="absolute top-1 left-1 text-[9px] bg-white/80 text-gray-700 px-1.5 py-0.5 rounded-full">
+                      {PHOTO_CATEGORIES.find(c => c.value === doc.category)?.label ?? '?'}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )
+          })()}
+
+          {/* Lightbox — opens SharePoint in a new tab since we can't proxy image bytes */}
+          {lightboxDoc && (
+            <div
+              onClick={() => setLightboxDoc(null)}
+              className="fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4 cursor-pointer"
+            >
+              <div
+                onClick={(e) => e.stopPropagation()}
+                className="bg-white rounded-lg max-w-md w-full p-6 cursor-default"
+              >
+                <h3 className="text-lg font-semibold text-gray-900 mb-2">{lightboxDoc.name}</h3>
+                <p className="text-xs text-gray-500 mb-4">
+                  {PHOTO_CATEGORIES.find(c => c.value === lightboxDoc.category)?.label ?? 'Photo'}
+                  {lightboxDoc.uploaded_at && ` · ${new Date(lightboxDoc.uploaded_at).toLocaleString()}`}
+                  {lightboxDoc.file_size_bytes && ` · ${fmtBytes(lightboxDoc.file_size_bytes)}`}
+                </p>
+                <div className="flex gap-2">
+                  <a
+                    href={lightboxDoc.sharepoint_url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex-1 text-sm text-center bg-pyramid-500 text-white px-3 py-2 rounded-lg hover:bg-pyramid-600 transition-colors"
+                  >
+                    Open in SharePoint
+                  </a>
+                  <button
+                    onClick={() => setLightboxDoc(null)}
+                    className="text-sm text-gray-500 hover:text-gray-700 px-3 py-2"
+                  >
+                    Close
+                  </button>
+                </div>
+              </div>
             </div>
           )}
         </>

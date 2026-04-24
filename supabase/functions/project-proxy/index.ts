@@ -15,8 +15,6 @@ const cors = {
 
 // ============================================================================
 // SharePoint subfolder structure per project
-// Files   -> paperwork (PDFs, docs) organized by document type
-// Pictures -> jobsite photos organized by phase
 // ============================================================================
 const SP_SUBFOLDER_TREE: Record<string, string[]> = {
   Files: [
@@ -29,12 +27,17 @@ const SP_SUBFOLDER_TREE: Record<string, string[]> = {
   ],
 };
 
+// Valid user_role values (from DB enum) — used to validate role updates
+const VALID_ROLES = [
+  "admin", "director_of_operations", "sales_rep", "estimating_coordinator",
+  "estimator", "project_manager", "assistant_pm", "task_manager",
+  "purchasing_manager", "billing_coordinator", "office_manager", "field_crew",
+];
+
 // ============================================================================
 // Helpers
 // ============================================================================
 
-// Decode Azure AD JWT payload without signature verification.
-// supabase.auth.getUser() fails with Microsoft-signed tokens (returns 401).
 function parseJwtPayload(token: string): Record<string, unknown> | null {
   try {
     const parts = token.split(".");
@@ -52,7 +55,6 @@ function sanitizeFolderName(projectNumber: string, address: string): string {
     .substring(0, 240);
 }
 
-// Create a single folder as a child of the given parent folder id (or root if null)
 async function createGraphFolder(
   token: string,
   name: string,
@@ -84,8 +86,6 @@ async function createGraphFolder(
   }
 }
 
-// Build the full per-project tree: root -> (Files, Pictures) -> subfolders.
-// Best-effort: if any subfolder fails, continue with others.
 async function createProjectFolderTree(
   token: string,
   rootName: string,
@@ -110,8 +110,6 @@ async function createProjectFolderTree(
   return { id: root.id, webUrl: root.webUrl, subfolders };
 }
 
-// Seed project_tasks from workflow_task_templates based on division.
-// Templates with division=null apply to both regular and IRA.
 async function seedTasksFromTemplates(
   projectId: string,
   division: string,
@@ -158,6 +156,39 @@ async function seedTasksFromTemplates(
   return rows.length;
 }
 
+// Write to staff_audit_log — best-effort, never fails the parent operation
+async function writeAudit(
+  email: string,
+  action: string,
+  changedBy: string | null,
+  oldValues: unknown,
+  newValues: unknown,
+  notes?: string,
+) {
+  try {
+    await supabase.from("staff_audit_log").insert({
+      email,
+      action,
+      changed_by: changedBy,
+      old_values: oldValues ?? null,
+      new_values: newValues ?? null,
+      notes: notes ?? null,
+    });
+  } catch (e) {
+    console.error("Audit write failed:", e);
+  }
+}
+
+// Look up the caller's profile by azure_oid (JWT sub/oid claim)
+async function lookupCallerProfile(userId: string) {
+  const { data } = await supabase
+    .from("profiles")
+    .select("id, email, role, is_active")
+    .eq("azure_oid", userId)
+    .maybeSingle();
+  return data;
+}
+
 // ============================================================================
 // Main handler
 // ============================================================================
@@ -193,8 +224,7 @@ serve(async (req) => {
       if (!newProject) return json({ error: "Insert returned no row" }, 500);
 
       const taskCount = await seedTasksFromTemplates(
-        newProject.id,
-        newProject.division,
+        newProject.id, newProject.division,
         {
           pm_id: newProject.pm_id,
           assistant_pm_id: newProject.assistant_pm_id,
@@ -202,7 +232,6 @@ serve(async (req) => {
         },
       );
 
-      // Production row (ignore duplicate error via maybeSingle)
       await supabase.from("project_production")
         .insert({ project_id: newProject.id, pm_id: newProject.pm_id ?? null });
 
@@ -236,7 +265,7 @@ serve(async (req) => {
     }
 
     // ------------------------------------------------------------------------
-    // BACKFILL PROJECT — idempotent fix for missing tasks / SP folder / production
+    // BACKFILL PROJECT
     // ------------------------------------------------------------------------
     if (action === "backfill_project") {
       const targetId = id || projectId;
@@ -248,28 +277,19 @@ serve(async (req) => {
 
       const meta: Record<string, unknown> = {
         project_number: proj.project_number,
-        tasks_already: 0,
-        tasks_seeded: 0,
-        sp_already: !!proj.sharepoint_folder_id,
-        sp_created: false,
-        sp_subfolders: 0,
-        production_already: false,
-        production_created: false,
+        tasks_already: 0, tasks_seeded: 0,
+        sp_already: !!proj.sharepoint_folder_id, sp_created: false, sp_subfolders: 0,
+        production_already: false, production_created: false,
       };
 
       const { count: existingCount } = await supabase
-        .from("project_tasks")
-        .select("*", { count: "exact", head: true })
-        .eq("project_id", proj.id);
-
+        .from("project_tasks").select("*", { count: "exact", head: true }).eq("project_id", proj.id);
       meta.tasks_already = existingCount ?? 0;
       if (!existingCount) {
-        const seeded = await seedTasksFromTemplates(
-          proj.id,
-          proj.division,
+        meta.tasks_seeded = await seedTasksFromTemplates(
+          proj.id, proj.division,
           { pm_id: proj.pm_id, assistant_pm_id: proj.assistant_pm_id, estimator_id: proj.estimator_id },
         );
-        meta.tasks_seeded = seeded;
       }
 
       const { data: existingProd } = await supabase
@@ -313,7 +333,7 @@ serve(async (req) => {
     }
 
     // ------------------------------------------------------------------------
-    // UPDATE PROJECT TEAM (pm_id / assistant_pm_id)
+    // UPDATE PROJECT TEAM
     // ------------------------------------------------------------------------
     if (action === "update_project") {
       const targetId = id || projectId;
@@ -331,7 +351,7 @@ serve(async (req) => {
     }
 
     // ------------------------------------------------------------------------
-    // UPDATE TASK (status, assigned_to_id, notes, etc.)
+    // UPDATE TASK
     // ------------------------------------------------------------------------
     if (action === "update_task") {
       if (!taskId) return json({ error: "taskId required" }, 400);
@@ -374,8 +394,7 @@ serve(async (req) => {
       allowed.updated_at = new Date().toISOString();
 
       const { data, error } = await supabase.from("project_milestones")
-        .update(allowed)
-        .eq("id", milestoneId)
+        .update(allowed).eq("id", milestoneId)
         .select("*, milestone_definitions(label, key, sort_order, active_from_stage)")
         .single();
       if (error) return json({ error: error.message }, 400);
@@ -383,7 +402,7 @@ serve(async (req) => {
     }
 
     // ------------------------------------------------------------------------
-    // UPLOAD FILE — SharePoint + project_documents record
+    // UPLOAD FILE — now with proper category subfolder path
     // ------------------------------------------------------------------------
     if (action === "upload_file") {
       const targetId = projectId || id;
@@ -425,6 +444,7 @@ serve(async (req) => {
 
       const { data: doc } = await supabase.from("project_documents").insert({
         project_id: targetId,
+        category: category ?? "Files/Other",
         document_type: document_type ?? null,
         name: fileName,
         sharepoint_item_id: driveItem.id,
@@ -436,6 +456,270 @@ serve(async (req) => {
       }).select().single();
 
       return json({ data: doc, meta: { sharepoint_url: driveItem.webUrl } });
+    }
+
+    // ------------------------------------------------------------------------
+    // DELETE FILE — soft-delete in DB, optionally remove from SharePoint
+    // ------------------------------------------------------------------------
+    if (action === "delete_file") {
+      const docId = body.documentId;
+      if (!docId) return json({ error: "documentId required" }, 400);
+
+      const { data: doc } = await supabase
+        .from("project_documents").select("*").eq("id", docId).single();
+      if (!doc) return json({ error: "document not found" }, 404);
+
+      // Soft delete in DB
+      await supabase.from("project_documents")
+        .update({ is_deleted: true }).eq("id", docId);
+
+      // Attempt SharePoint removal (best-effort)
+      if (providerToken && doc.sharepoint_item_id) {
+        try {
+          await fetch(
+            `${GRAPH_BASE}/sites/${SP_SITE_ID}/drive/items/${doc.sharepoint_item_id}`,
+            { method: "DELETE", headers: { Authorization: `Bearer ${providerToken}` } },
+          );
+        } catch (e) {
+          console.error("SP delete failed:", e);
+        }
+      }
+
+      return json({ data: { id: docId, is_deleted: true } });
+    }
+
+    // ========================================================================
+    // STAFF MANAGEMENT ACTIONS
+    // ========================================================================
+
+    // ------------------------------------------------------------------------
+    // UPSERT WHITELIST — invite a new person or update existing whitelist row
+    // ------------------------------------------------------------------------
+    if (action === "upsert_whitelist") {
+      const caller = await lookupCallerProfile(userId);
+      if (!caller || caller.role !== "admin") {
+        return json({ error: "Admin only" }, 403);
+      }
+
+      const { email, display_name, full_name, role, division, phone, title } = body;
+      if (!email || !full_name) {
+        return json({ error: "email and full_name required" }, 400);
+      }
+      if (role && !VALID_ROLES.includes(role)) {
+        return json({ error: `Invalid role. Must be one of: ${VALID_ROLES.join(", ")}` }, 400);
+      }
+
+      const normalizedEmail = String(email).toLowerCase().trim();
+
+      // Check if already exists
+      const { data: existing } = await supabase
+        .from("staff_whitelist").select("*").eq("email", normalizedEmail).maybeSingle();
+
+      const record = {
+        email: normalizedEmail,
+        display_name: display_name ?? full_name.split(" ")[0],
+        full_name,
+        role: role ?? "field_crew",
+        division: division ?? null,
+        phone: phone ?? null,
+        title: title ?? null,
+        is_active: true,
+      };
+
+      const { data, error } = await supabase
+        .from("staff_whitelist").upsert(record, { onConflict: "email" }).select().single();
+
+      if (error) return json({ error: error.message }, 400);
+
+      // Audit
+      await writeAudit(
+        normalizedEmail,
+        existing ? "update_whitelist" : "invite",
+        caller.id,
+        existing ?? null,
+        data,
+      );
+
+      // If a profile already exists (e.g. re-adding after deactivation), also
+      // reactivate and update the profile to match the new whitelist data
+      const { data: existingProfile } = await supabase
+        .from("profiles").select("*").eq("email", normalizedEmail).maybeSingle();
+
+      if (existingProfile) {
+        await supabase.from("profiles").update({
+          full_name: record.full_name,
+          display_name: record.display_name,
+          role: record.role,
+          division: record.division,
+          phone: record.phone,
+          title: record.title,
+          is_active: true,
+          updated_at: new Date().toISOString(),
+        }).eq("id", existingProfile.id);
+      }
+
+      return json({ data, meta: { reactivated_profile: !!existingProfile } });
+    }
+
+    // ------------------------------------------------------------------------
+    // UPDATE PROFILE — change role, division, etc. for an existing user
+    // ------------------------------------------------------------------------
+    if (action === "update_profile") {
+      const caller = await lookupCallerProfile(userId);
+      if (!caller || caller.role !== "admin") {
+        return json({ error: "Admin only" }, 403);
+      }
+
+      const profileId = body.profileId;
+      if (!profileId) return json({ error: "profileId required" }, 400);
+
+      const { data: existing } = await supabase
+        .from("profiles").select("*").eq("id", profileId).single();
+      if (!existing) return json({ error: "profile not found" }, 404);
+
+      const allowed: Record<string, unknown> = {};
+      if (updates?.role !== undefined) {
+        if (!VALID_ROLES.includes(updates.role)) {
+          return json({ error: `Invalid role` }, 400);
+        }
+        allowed.role = updates.role;
+      }
+      if (updates?.division !== undefined)     allowed.division = updates.division || null;
+      if (updates?.display_name !== undefined) allowed.display_name = updates.display_name;
+      if (updates?.full_name !== undefined)    allowed.full_name = updates.full_name;
+      if (updates?.title !== undefined)        allowed.title = updates.title || null;
+      if (updates?.phone !== undefined)        allowed.phone = updates.phone || null;
+
+      if (Object.keys(allowed).length === 0) {
+        return json({ error: "No valid fields to update" }, 400);
+      }
+      allowed.updated_at = new Date().toISOString();
+
+      const { data, error } = await supabase.from("profiles")
+        .update(allowed).eq("id", profileId).select().single();
+      if (error) return json({ error: error.message }, 400);
+
+      // Also mirror role/division changes to the whitelist for consistency
+      if (allowed.role || allowed.division !== undefined) {
+        const mirror: Record<string, unknown> = {};
+        if (allowed.role !== undefined) mirror.role = allowed.role;
+        if (allowed.division !== undefined) mirror.division = allowed.division;
+        await supabase.from("staff_whitelist")
+          .update(mirror).eq("email", existing.email);
+      }
+
+      await writeAudit(existing.email, "update_role", caller.id, existing, data);
+      return json({ data });
+    }
+
+    // ------------------------------------------------------------------------
+    // DEACTIVATE STAFF — soft off-boarding (reversible)
+    // Flips is_active=false on BOTH profile and whitelist.
+    // User can still be reactivated from the Inactive Staff tab.
+    // ------------------------------------------------------------------------
+    if (action === "deactivate_staff") {
+      const caller = await lookupCallerProfile(userId);
+      if (!caller || caller.role !== "admin") {
+        return json({ error: "Admin only" }, 403);
+      }
+
+      const targetId = body.profileId;
+      if (!targetId) return json({ error: "profileId required" }, 400);
+
+      if (targetId === caller.id) {
+        return json({ error: "Cannot deactivate yourself" }, 400);
+      }
+
+      const { data: existing } = await supabase
+        .from("profiles").select("*").eq("id", targetId).single();
+      if (!existing) return json({ error: "profile not found" }, 404);
+
+      await supabase.from("profiles")
+        .update({ is_active: false, updated_at: new Date().toISOString() })
+        .eq("id", targetId);
+
+      await supabase.from("staff_whitelist")
+        .update({ is_active: false }).eq("email", existing.email);
+
+      await writeAudit(existing.email, "deactivate", caller.id, existing, { is_active: false });
+
+      return json({ data: { profileId: targetId, email: existing.email, is_active: false } });
+    }
+
+    // ------------------------------------------------------------------------
+    // REACTIVATE STAFF — restore a previously-deactivated person
+    // ------------------------------------------------------------------------
+    if (action === "reactivate_staff") {
+      const caller = await lookupCallerProfile(userId);
+      if (!caller || caller.role !== "admin") {
+        return json({ error: "Admin only" }, 403);
+      }
+
+      const targetId = body.profileId;
+      if (!targetId) return json({ error: "profileId required" }, 400);
+
+      const { data: existing } = await supabase
+        .from("profiles").select("*").eq("id", targetId).single();
+      if (!existing) return json({ error: "profile not found" }, 404);
+
+      await supabase.from("profiles")
+        .update({ is_active: true, updated_at: new Date().toISOString() })
+        .eq("id", targetId);
+
+      await supabase.from("staff_whitelist")
+        .update({ is_active: true }).eq("email", existing.email);
+
+      await writeAudit(existing.email, "reactivate", caller.id, existing, { is_active: true });
+
+      return json({ data: { profileId: targetId, email: existing.email, is_active: true } });
+    }
+
+    // ------------------------------------------------------------------------
+    // HARD DELETE STAFF — destructive, admin-panel-only
+    // Wipes profile + whitelist. Keeps audit log row forever.
+    // Requires confirm=true in body (caller UI must collect explicit confirmation).
+    // ------------------------------------------------------------------------
+    if (action === "hard_delete_staff") {
+      const caller = await lookupCallerProfile(userId);
+      if (!caller || caller.role !== "admin") {
+        return json({ error: "Admin only" }, 403);
+      }
+
+      if (body.confirm !== true) {
+        return json({ error: "confirm=true required for destructive action" }, 400);
+      }
+
+      const targetId = body.profileId;
+      if (!targetId) return json({ error: "profileId required" }, 400);
+
+      if (targetId === caller.id) {
+        return json({ error: "Cannot delete yourself" }, 400);
+      }
+
+      const { data: existing } = await supabase
+        .from("profiles").select("*").eq("id", targetId).single();
+      if (!existing) return json({ error: "profile not found" }, 404);
+
+      // Write audit FIRST (before we nuke the profile — FK reference needed)
+      await writeAudit(
+        existing.email, "hard_delete", caller.id, existing, null,
+        body.reason ?? "Hard delete by admin",
+      );
+
+      // Wipe whitelist (no FK constraints)
+      await supabase.from("staff_whitelist").delete().eq("email", existing.email);
+
+      // Wipe profile — FK constraints on project_tasks.assigned_to_id etc. will
+      // cascade NULL via the existing FK definitions. If any FK is ON DELETE RESTRICT,
+      // this will fail safely and return an error.
+      const { error: delErr } = await supabase.from("profiles").delete().eq("id", targetId);
+      if (delErr) {
+        return json({
+          error: `Cannot hard delete: ${delErr.message}. Use deactivate instead.`,
+        }, 400);
+      }
+
+      return json({ data: { profileId: targetId, email: existing.email, deleted: true } });
     }
 
     // ------------------------------------------------------------------------

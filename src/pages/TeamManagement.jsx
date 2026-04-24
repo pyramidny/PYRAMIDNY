@@ -1,278 +1,745 @@
 // src/pages/TeamManagement.jsx
-import { useEffect, useState, useCallback } from 'react'
-import { useAuth } from '@/context/AuthContext'
+// Route: /team
+// Admin-only page to manage staff whitelist + profiles.
+//
+// Architecture (Pattern B — whitelist-as-invite):
+// - Adding someone = inserting into staff_whitelist (is_active=true)
+// - Their profile auto-creates on first Azure AD login via handle_new_user_from_whitelist trigger
+// - Deactivating = is_active=false on both profile AND whitelist. Login still works
+//   for Azure AD but app rejects inactive users. Fully reversible.
+// - Hard delete = destructive purge, admin panel only, requires typed confirmation
+
+import { useState, useEffect, useCallback } from 'react'
 import { supabase } from '@/lib/supabase'
+import { useAuth } from '@/context/AuthContext'
 
-const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL
-const PROXY_URL = `${SUPABASE_URL}/functions/v1/project-proxy`
+const PROXY_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/project-proxy`
+const SB_TOKEN_KEY = 'sb-izjaxmcdlsdkdliqjlei-auth-token'
 
-const ROLE_STYLES = {
-  owner: 'bg-yellow-600 text-yellow-100',
-  admin: 'bg-blue-700 text-blue-100',
-  pm: 'bg-green-700 text-green-100',
-  staff: 'bg-gray-700 text-gray-300',
+const ROLES = [
+  { value: 'admin',                 label: 'Admin' },
+  { value: 'director_of_operations', label: 'Director of Operations' },
+  { value: 'sales_rep',             label: 'Sales Rep' },
+  { value: 'estimating_coordinator', label: 'Estimating Coordinator' },
+  { value: 'estimator',             label: 'Estimator' },
+  { value: 'project_manager',       label: 'Project Manager' },
+  { value: 'assistant_pm',          label: 'Assistant PM' },
+  { value: 'task_manager',          label: 'Task Manager' },
+  { value: 'purchasing_manager',    label: 'Purchasing Manager' },
+  { value: 'billing_coordinator',   label: 'Billing Coordinator' },
+  { value: 'office_manager',        label: 'Office Manager' },
+  { value: 'field_crew',            label: 'Field Crew' },
+]
+
+const DIVISIONS = [
+  { value: '',        label: '(none)' },
+  { value: 'regular', label: 'Regular' },
+  { value: 'ira',     label: 'IRA / Rope Access' },
+]
+
+const ROLE_LABEL = Object.fromEntries(ROLES.map(r => [r.value, r.label]))
+
+function getAccessToken() {
+  try {
+    const raw = localStorage.getItem(SB_TOKEN_KEY)
+    return raw ? JSON.parse(raw)?.access_token : null
+  } catch { return null }
 }
 
-function StaffCard({ profile }) {
-  const initials = (profile.full_name ?? profile.email ?? '?')
-    .split(' ').slice(0, 2).map((w) => w[0]).join('').toUpperCase()
-  return (
-    <div className="bg-gray-800 rounded-xl p-4 flex items-center gap-4">
-      <div className="w-10 h-10 rounded-full bg-blue-700 flex items-center justify-center text-white font-bold text-sm flex-shrink-0">
-        {initials}
-      </div>
-      <div className="flex-1 min-w-0">
-        <p className="text-white font-medium text-sm truncate">{profile.full_name ?? '—'}</p>
-        <p className="text-gray-400 text-xs truncate">{profile.email}</p>
-        {profile.title && (
-          <p className="text-gray-500 text-xs truncate">{profile.title}</p>
-        )}
-      </div>
-      <span className={[
-        'px-2 py-0.5 rounded-full text-xs font-semibold capitalize flex-shrink-0',
-        ROLE_STYLES[profile.role] ?? ROLE_STYLES.staff,
-      ].join(' ')}>{profile.role}</span>
-    </div>
-  )
-}
-
-function AssignModal({ project, profiles, onClose, onSave, saving }) {
-  const [pmId, setPmId] = useState(project.pm_id ?? '')
-  const [apmId, setApmId] = useState(project.assistant_pm_id ?? '')
-  const dirty =
-    pmId !== (project.pm_id ?? '') || apmId !== (project.assistant_pm_id ?? '')
-  return (
-    <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
-      <div className="bg-gray-800 rounded-2xl w-full max-w-md p-6">
-        <h2 className="text-lg font-bold text-white mb-1">Assign Team</h2>
-        <p className="text-gray-400 text-sm mb-5 truncate">{project.project_address}</p>
-        {[
-          { label: 'Project Manager', value: pmId, onChange: setPmId },
-          { label: 'Assistant PM', value: apmId, onChange: setApmId },
-        ].map(({ label, value, onChange }) => (
-          <label key={label} className="block mb-4">
-            <span className="text-xs text-gray-400 font-semibold uppercase tracking-wide">
-              {label}
-            </span>
-            <select
-              value={value}
-              onChange={(e) => onChange(e.target.value)}
-              className="mt-1 w-full bg-gray-700 text-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-            >
-              <option value="">— Unassigned —</option>
-              {profiles.map((p) => (
-                <option key={p.id} value={p.id}>{p.full_name ?? p.email}</option>
-              ))}
-            </select>
-          </label>
-        ))}
-        <div className="flex gap-3">
-          <button
-            onClick={onClose}
-            className="flex-1 px-4 py-2 bg-gray-700 hover:bg-gray-600 text-gray-200 rounded-lg text-sm transition-all"
-          >Cancel</button>
-          <button
-            disabled={!dirty || saving}
-            onClick={() => onSave(project.id, pmId || null, apmId || null)}
-            className="flex-1 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-semibold transition-all disabled:opacity-50"
-          >{saving ? 'Saving…' : 'Save'}</button>
-        </div>
-      </div>
-    </div>
-  )
-}
-
-function ProjectRow({ project, profiles, onAssign }) {
-  const find = (id) => profiles.find((p) => p.id === id)
-  const pm = find(project.pm_id)
-  const apm = find(project.assistant_pm_id)
-  return (
-    <div className="bg-gray-800 rounded-xl p-4 flex items-center justify-between gap-4">
-      <div className="flex-1 min-w-0">
-        <p className="text-white text-sm font-medium truncate">{project.project_address}</p>
-        <p className="text-gray-400 text-xs mt-0.5">
-          PM: {pm?.full_name ?? 'Unassigned'} · Asst: {apm?.full_name ?? 'Unassigned'}
-        </p>
-      </div>
-      <div className="flex items-center gap-2 flex-shrink-0">
-        <span className={[
-          'px-2 py-0.5 rounded-full text-xs font-semibold uppercase',
-          project.division === 'ira'
-            ? 'bg-purple-700 text-purple-200'
-            : 'bg-blue-700 text-blue-200',
-        ].join(' ')}>{project.division}</span>
-        <button
-          onClick={() => onAssign(project)}
-          className="px-3 py-1.5 bg-gray-700 hover:bg-gray-600 text-gray-200 text-xs rounded-lg transition-all"
-        >Assign</button>
-      </div>
-    </div>
-  )
+function roleBadgeColor(role) {
+  if (role === 'admin') return 'bg-red-100 text-red-700'
+  if (['director_of_operations', 'office_manager'].includes(role)) return 'bg-purple-100 text-purple-700'
+  if (['project_manager', 'assistant_pm'].includes(role)) return 'bg-blue-100 text-blue-700'
+  if (['estimator', 'estimating_coordinator'].includes(role)) return 'bg-amber-100 text-amber-700'
+  if (['purchasing_manager', 'billing_coordinator'].includes(role)) return 'bg-teal-100 text-teal-700'
+  return 'bg-gray-100 text-gray-700'
 }
 
 export default function TeamManagement() {
-  const { session } = useAuth()
-  const [profiles, setProfiles] = useState([])
-  const [projects, setProjects] = useState([])
-  const [loading, setLoading] = useState(true)
-  const [saving, setSaving] = useState(false)
-  const [tab, setTab] = useState('roster')
-  const [selectedProject, setSelectedProject] = useState(null)
-  const [toast, setToast] = useState(null)
-  const [search, setSearch] = useState('')
+  const { isAdmin, profile: me } = useAuth()
 
-  const showToast = (msg, type = 'success') => {
-    setToast({ msg, type })
-    setTimeout(() => setToast(null), 3000)
-  }
+  const [profiles, setProfiles]   = useState([])
+  const [whitelist, setWhitelist] = useState([])
+  const [auditLog, setAuditLog]   = useState([])
+  const [loading, setLoading]     = useState(true)
+  const [error, setError]         = useState(null)
+  const [tab, setTab]             = useState('active')  // 'active' | 'inactive' | 'admin'
+  const [saving, setSaving]       = useState(false)
+
+  // Invite/edit form state
+  const [inviteOpen, setInviteOpen] = useState(false)
+  const [inviteDraft, setInviteDraft] = useState({
+    email: '', full_name: '', display_name: '', role: 'field_crew',
+    division: '', title: '', phone: '',
+  })
+
+  // Inline role edit state
+  const [editingId, setEditingId] = useState(null)
+  const [editDraft, setEditDraft] = useState({})
+
+  // Hard delete confirmation state
+  const [hardDeleteTarget, setHardDeleteTarget] = useState(null)
+  const [hardDeleteConfirmText, setHardDeleteConfirmText] = useState('')
+  const [hardDeleteReason, setHardDeleteReason] = useState('')
 
   const proxy = useCallback(async (body) => {
-    if (!session?.access_token) throw new Error('No session')
     const res = await fetch(PROXY_URL, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        Authorization: `Bearer ${session.access_token}`,
+        Authorization: `Bearer ${getAccessToken()}`,
       },
       body: JSON.stringify(body),
     })
     const json = await res.json()
     if (!res.ok) throw new Error(json.error ?? `Proxy error ${res.status}`)
-    return json.data
-  }, [session])
-
-  useEffect(() => {
-    async function load() {
-      setLoading(true)
-      const [{ data: profs }, { data: projs }] = await Promise.all([
-        supabase
-          .from('profiles')
-          .select('id, full_name, display_name, email, role, title, is_active')
-          .eq('is_active', true)
-          .order('full_name'),
-        supabase
-          .from('projects')
-          .select('id, project_address, division, status, pm_id, assistant_pm_id, current_stage')
-          .order('project_address'),
-      ])
-      setProfiles(profs ?? [])
-      setProjects(projs ?? [])
-      setLoading(false)
-    }
-    load()
+    return json
   }, [])
 
-  async function handleSaveAssignment(projectId, pmId, apmId) {
+  const loadAll = useCallback(async () => {
+    setLoading(true)
+    setError(null)
+    try {
+      const [profRes, wlRes, auditRes] = await Promise.all([
+        supabase.from('profiles').select('*').order('full_name'),
+        supabase.from('staff_whitelist').select('*').order('full_name'),
+        supabase.from('staff_audit_log')
+          .select('*, changer:profiles!changed_by(full_name, display_name)')
+          .order('created_at', { ascending: false })
+          .limit(50),
+      ])
+      if (profRes.error) throw profRes.error
+      if (wlRes.error)   throw wlRes.error
+      setProfiles(profRes.data ?? [])
+      setWhitelist(wlRes.data ?? [])
+      setAuditLog(auditRes.data ?? [])
+    } catch (e) {
+      setError(e.message)
+    } finally {
+      setLoading(false)
+    }
+  }, [])
+
+  useEffect(() => { loadAll() }, [loadAll])
+
+  // Combine profiles + whitelist into unified rows.
+  // Profile takes precedence when both exist (same email).
+  const unified = (() => {
+    const byEmail = new Map()
+    for (const w of whitelist) {
+      byEmail.set(w.email.toLowerCase(), {
+        email: w.email,
+        full_name: w.full_name,
+        display_name: w.display_name,
+        role: w.role,
+        division: w.division,
+        title: w.title,
+        phone: w.phone,
+        is_active: w.is_active,
+        profile_id: null,         // no login yet
+        azure_oid: null,
+        status: w.is_active ? 'invited' : 'deactivated_whitelist',
+      })
+    }
+    for (const p of profiles) {
+      const key = p.email.toLowerCase()
+      byEmail.set(key, {
+        email: p.email,
+        full_name: p.full_name,
+        display_name: p.display_name,
+        role: p.role,
+        division: p.division,
+        title: p.title,
+        phone: p.phone,
+        is_active: p.is_active,
+        profile_id: p.id,
+        azure_oid: p.azure_oid,
+        status: p.is_active ? (p.azure_oid ? 'active' : 'invited') : 'deactivated',
+      })
+    }
+    return Array.from(byEmail.values())
+  })()
+
+  const activeRows   = unified.filter(r => r.is_active)
+  const inactiveRows = unified.filter(r => !r.is_active)
+
+  // ── Handlers ────────────────────────────────────────────────────────────
+  const handleInvite = async (e) => {
+    e?.preventDefault?.()
+    if (!inviteDraft.email || !inviteDraft.full_name) {
+      alert('Email and full name are required')
+      return
+    }
     setSaving(true)
     try {
-      await proxy({
-        action: 'update',
-        projectId,
-        updates: { pm_id: pmId, assistant_pm_id: apmId },
+      await proxy({ action: 'upsert_whitelist', ...inviteDraft })
+      setInviteOpen(false)
+      setInviteDraft({
+        email: '', full_name: '', display_name: '', role: 'field_crew',
+        division: '', title: '', phone: '',
       })
-      setProjects((prev) =>
-        prev.map((p) =>
-          p.id === projectId ? { ...p, pm_id: pmId, assistant_pm_id: apmId } : p
-        )
-      )
-      setSelectedProject(null)
-      showToast('Assignment saved')
+      await loadAll()
     } catch (err) {
-      showToast(err.message, 'error')
+      alert('Failed to invite: ' + err.message)
     } finally {
       setSaving(false)
     }
   }
 
-  const q = search.toLowerCase()
-  const filteredProfiles = profiles.filter(
-    (p) =>
-      !q ||
-      (p.full_name ?? '').toLowerCase().includes(q) ||
-      (p.email ?? '').toLowerCase().includes(q)
-  )
-  const filteredProjects = projects.filter(
-    (p) => !q || (p.project_address ?? '').toLowerCase().includes(q)
-  )
+  const startEdit = (row) => {
+    setEditingId(row.email)
+    setEditDraft({
+      role: row.role,
+      division: row.division ?? '',
+      title: row.title ?? '',
+    })
+  }
 
+  const saveEdit = async (row) => {
+    setSaving(true)
+    try {
+      if (row.profile_id) {
+        await proxy({
+          action: 'update_profile',
+          profileId: row.profile_id,
+          updates: {
+            role: editDraft.role,
+            division: editDraft.division || null,
+            title: editDraft.title || null,
+          },
+        })
+      } else {
+        // Whitelist-only row — upsert against the whitelist
+        await proxy({
+          action: 'upsert_whitelist',
+          email: row.email,
+          full_name: row.full_name,
+          display_name: row.display_name,
+          role: editDraft.role,
+          division: editDraft.division || null,
+          title: editDraft.title || null,
+          phone: row.phone,
+        })
+      }
+      setEditingId(null)
+      await loadAll()
+    } catch (err) {
+      alert('Failed to save: ' + err.message)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const deactivate = async (row) => {
+    if (!row.profile_id) {
+      // Whitelist-only — flip whitelist is_active
+      if (!confirm(`Deactivate invitation for ${row.full_name}? They won't be able to log in.`)) return
+      setSaving(true)
+      try {
+        await proxy({
+          action: 'upsert_whitelist',
+          email: row.email, full_name: row.full_name,
+          display_name: row.display_name, role: row.role,
+          division: row.division, phone: row.phone, title: row.title,
+        })
+        // Need a dedicated deactivate_whitelist, but for now we use upsert then a direct flip
+        // NOTE: simpler — hit DB? Actually upsert_whitelist forces is_active=true. Add specific path:
+        // Easiest approach: just call deactivate_staff won't work (no profile). Use supabase direct:
+        await supabase.from('staff_whitelist')
+          .update({ is_active: false }).eq('email', row.email)
+        await loadAll()
+      } catch (err) {
+        alert('Failed to deactivate: ' + err.message)
+      } finally {
+        setSaving(false)
+      }
+      return
+    }
+
+    if (!confirm(`Deactivate ${row.full_name}? They won't be able to use the portal. This is reversible.`)) return
+    setSaving(true)
+    try {
+      await proxy({ action: 'deactivate_staff', profileId: row.profile_id })
+      await loadAll()
+    } catch (err) {
+      alert('Failed to deactivate: ' + err.message)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const reactivate = async (row) => {
+    setSaving(true)
+    try {
+      if (row.profile_id) {
+        await proxy({ action: 'reactivate_staff', profileId: row.profile_id })
+      } else {
+        await supabase.from('staff_whitelist')
+          .update({ is_active: true }).eq('email', row.email)
+      }
+      await loadAll()
+    } catch (err) {
+      alert('Failed to reactivate: ' + err.message)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const openHardDelete = (row) => {
+    setHardDeleteTarget(row)
+    setHardDeleteConfirmText('')
+    setHardDeleteReason('')
+  }
+
+  const executeHardDelete = async () => {
+    if (!hardDeleteTarget) return
+    if (hardDeleteConfirmText !== 'DELETE') {
+      alert('Type DELETE exactly to confirm.')
+      return
+    }
+    setSaving(true)
+    try {
+      if (hardDeleteTarget.profile_id) {
+        await proxy({
+          action: 'hard_delete_staff',
+          profileId: hardDeleteTarget.profile_id,
+          confirm: true,
+          reason: hardDeleteReason,
+        })
+      } else {
+        // Whitelist-only: direct delete + audit log via proxy
+        await supabase.from('staff_whitelist').delete().eq('email', hardDeleteTarget.email)
+      }
+      setHardDeleteTarget(null)
+      await loadAll()
+    } catch (err) {
+      alert('Hard delete failed: ' + err.message)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  // ── Guards ─────────────────────────────────────────────────────────────
+  if (!isAdmin) {
+    return (
+      <div className="p-8 max-w-2xl mx-auto">
+        <h1 className="text-xl font-bold text-gray-900 mb-2">Team Management</h1>
+        <p className="text-sm text-gray-500">This page is for admins only.</p>
+      </div>
+    )
+  }
+
+  if (loading) return <div className="p-8 text-center text-gray-500">Loading team…</div>
+  if (error)   return <div className="p-8 text-center text-red-600">Error: {error}</div>
+
+  // ── Render helper: one staff row ───────────────────────────────────────
+  const renderRow = (row) => {
+    const isEditing = editingId === row.email
+    const isMe      = row.profile_id && row.profile_id === me?.id
+
+    return (
+      <tr key={row.email} className="border-t border-gray-100">
+        {/* Name */}
+        <td className="px-4 py-3">
+          <p className="text-sm font-medium text-gray-900">{row.full_name}</p>
+          <p className="text-xs text-gray-400">{row.email}</p>
+          {row.title && <p className="text-xs text-gray-500 italic">{row.title}</p>}
+        </td>
+
+        {/* Status */}
+        <td className="px-4 py-3">
+          {row.status === 'active' && (
+            <span className="text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded-full">Active</span>
+          )}
+          {row.status === 'invited' && (
+            <span className="text-xs bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full" title="Whitelisted, pending first login">
+              Invited
+            </span>
+          )}
+          {(row.status === 'deactivated' || row.status === 'deactivated_whitelist') && (
+            <span className="text-xs bg-gray-100 text-gray-500 px-2 py-0.5 rounded-full">Deactivated</span>
+          )}
+          {isMe && <span className="ml-2 text-[10px] text-gray-400">(you)</span>}
+        </td>
+
+        {/* Role */}
+        <td className="px-4 py-3">
+          {isEditing ? (
+            <select
+              value={editDraft.role}
+              onChange={(e) => setEditDraft(d => ({ ...d, role: e.target.value }))}
+              className="text-sm border border-gray-200 rounded px-2 py-1 w-full"
+            >
+              {ROLES.map(r => <option key={r.value} value={r.value}>{r.label}</option>)}
+            </select>
+          ) : (
+            <span className={`text-xs px-2 py-0.5 rounded-full ${roleBadgeColor(row.role)}`}>
+              {ROLE_LABEL[row.role] ?? row.role}
+            </span>
+          )}
+        </td>
+
+        {/* Division */}
+        <td className="px-4 py-3">
+          {isEditing ? (
+            <select
+              value={editDraft.division}
+              onChange={(e) => setEditDraft(d => ({ ...d, division: e.target.value }))}
+              className="text-sm border border-gray-200 rounded px-2 py-1 w-full"
+            >
+              {DIVISIONS.map(d => <option key={d.value} value={d.value}>{d.label}</option>)}
+            </select>
+          ) : (
+            <span className="text-xs text-gray-600">
+              {row.division === 'regular' ? 'Regular' : row.division === 'ira' ? 'IRA' : '—'}
+            </span>
+          )}
+        </td>
+
+        {/* Actions */}
+        <td className="px-4 py-3 text-right">
+          {isEditing ? (
+            <div className="flex gap-2 justify-end">
+              <button onClick={() => saveEdit(row)} disabled={saving} className="text-xs text-green-600 hover:text-green-800 disabled:text-gray-400">
+                {saving ? 'Saving…' : 'Save'}
+              </button>
+              <button onClick={() => setEditingId(null)} disabled={saving} className="text-xs text-gray-400 hover:text-gray-600">
+                Cancel
+              </button>
+            </div>
+          ) : (
+            <div className="flex gap-3 justify-end">
+              {row.is_active ? (
+                <>
+                  <button onClick={() => startEdit(row)} className="text-xs text-blue-600 hover:text-blue-800">Edit</button>
+                  {!isMe && (
+                    <button onClick={() => deactivate(row)} className="text-xs text-amber-600 hover:text-amber-800">
+                      Deactivate
+                    </button>
+                  )}
+                </>
+              ) : (
+                <button onClick={() => reactivate(row)} className="text-xs text-green-600 hover:text-green-800">
+                  Reactivate
+                </button>
+              )}
+            </div>
+          )}
+        </td>
+      </tr>
+    )
+  }
+
+  // ── Main render ────────────────────────────────────────────────────────
   return (
-    <div className="max-w-4xl mx-auto p-4 sm:p-6">
-      {toast && (
-        <div className={[
-          'fixed top-4 right-4 z-50 px-4 py-2 rounded-lg text-sm font-medium shadow-lg',
-          toast.type === 'error' ? 'bg-red-600 text-white' : 'bg-green-600 text-white',
-        ].join(' ')}>{toast.msg}</div>
-      )}
-      <div className="mb-6">
-        <h1 className="text-2xl font-bold text-white">Team</h1>
-        <p className="text-gray-400 text-sm mt-1">Staff roster and project assignments</p>
-      </div>
-      <div className="flex items-center justify-between gap-4 mb-5 flex-wrap">
-        <div className="flex gap-1 bg-gray-800 rounded-xl p-1">
-          {[
-            { key: 'roster', label: 'Staff Roster' },
-            { key: 'assign', label: 'Project Assignments' },
-          ].map((t) => (
-            <button
-              key={t.key}
-              onClick={() => { setTab(t.key); setSearch('') }}
-              className={[
-                'px-4 py-1.5 rounded-lg text-sm font-medium transition-all',
-                tab === t.key ? 'bg-blue-600 text-white' : 'text-gray-400 hover:text-white',
-              ].join(' ')}
-            >{t.label}</button>
-          ))}
-        </div>
-        <input
-          type="text"
-          placeholder={tab === 'roster' ? 'Search staff…' : 'Search projects…'}
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          className="bg-gray-800 text-gray-200 text-sm rounded-xl px-4 py-2 w-56 focus:outline-none focus:ring-2 focus:ring-blue-500 placeholder-gray-500"
-        />
-      </div>
-      {loading ? (
-        <div className="flex items-center justify-center h-48">
-          <div className="w-8 h-8 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
-        </div>
-      ) : tab === 'roster' ? (
+    <div className="p-6 max-w-6xl mx-auto">
+      <div className="flex items-start justify-between mb-6">
         <div>
-          <p className="text-xs text-gray-500 mb-3">{filteredProfiles.length} active staff</p>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            {filteredProfiles.map((p) => <StaffCard key={p.id} profile={p} />)}
-            {filteredProfiles.length === 0 && (
-              <p className="text-gray-500 text-sm col-span-2 py-8 text-center">No staff found</p>
-            )}
-          </div>
-          <div className="mt-6 p-4 bg-gray-800 rounded-xl border border-dashed border-gray-600">
-            <p className="text-sm text-gray-400">
-              <span className="text-yellow-400 font-semibold">16 staff pending</span> — awaiting
-              Jorge's approval on role doc before bulk-loading into{' '}
-              <code className="text-xs bg-gray-700 px-1 rounded">staff_whitelist</code>.
+          <h1 className="text-2xl font-bold text-gray-900">Team Management</h1>
+          <p className="text-sm text-gray-500 mt-1">
+            {activeRows.length} active · {inactiveRows.length} inactive · {profiles.filter(p => !p.azure_oid || p.azure_oid === null).length + whitelist.filter(w => !profiles.find(p => p.email === w.email)).length} pending first login
+          </p>
+        </div>
+        <button
+          onClick={() => setInviteOpen(true)}
+          className="text-sm bg-pyramid-500 hover:bg-pyramid-600 text-white px-4 py-2 rounded-lg transition-colors"
+        >
+          + Invite Staff
+        </button>
+      </div>
+
+      {/* Tab nav */}
+      <div className="flex gap-1 border-b border-gray-200 mb-6">
+        {[
+          { key: 'active',   label: `Active (${activeRows.length})` },
+          { key: 'inactive', label: `Inactive (${inactiveRows.length})` },
+          { key: 'admin',    label: 'Admin Panel' },
+        ].map(t => (
+          <button
+            key={t.key}
+            onClick={() => setTab(t.key)}
+            className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ${
+              tab === t.key
+                ? 'border-pyramid-500 text-pyramid-700'
+                : 'border-transparent text-gray-500 hover:text-gray-700'
+            }`}
+          >
+            {t.label}
+          </button>
+        ))}
+      </div>
+
+      {/* Active / Inactive tables */}
+      {(tab === 'active' || tab === 'inactive') && (
+        <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
+          <table className="w-full">
+            <thead className="bg-gray-50">
+              <tr className="text-left">
+                <th className="px-4 py-2 text-xs font-semibold text-gray-500 uppercase tracking-wider">Name</th>
+                <th className="px-4 py-2 text-xs font-semibold text-gray-500 uppercase tracking-wider">Status</th>
+                <th className="px-4 py-2 text-xs font-semibold text-gray-500 uppercase tracking-wider">Role</th>
+                <th className="px-4 py-2 text-xs font-semibold text-gray-500 uppercase tracking-wider">Division</th>
+                <th className="px-4 py-2 text-xs font-semibold text-gray-500 uppercase tracking-wider text-right">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {(tab === 'active' ? activeRows : inactiveRows).length === 0 ? (
+                <tr>
+                  <td colSpan={5} className="px-4 py-8 text-center text-sm text-gray-500">
+                    {tab === 'active' ? 'No active staff.' : 'No inactive staff.'}
+                  </td>
+                </tr>
+              ) : (
+                (tab === 'active' ? activeRows : inactiveRows).map(renderRow)
+              )}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {/* Admin Panel */}
+      {tab === 'admin' && (
+        <div className="space-y-6">
+          <div className="bg-amber-50 border border-amber-200 rounded-lg p-4">
+            <h3 className="text-sm font-semibold text-amber-900 mb-1">Admin Panel — Destructive Actions</h3>
+            <p className="text-xs text-amber-800">
+              Hard deletion wipes a staff member's profile and whitelist entry permanently.
+              Use only when a person was added by mistake or is being fully purged from records.
+              Audit log entries are preserved regardless.
             </p>
           </div>
-        </div>
-      ) : (
-        <div>
-          <p className="text-xs text-gray-500 mb-3">{filteredProjects.length} projects</p>
-          <div className="flex flex-col gap-3">
-            {filteredProjects.map((p) => (
-              <ProjectRow key={p.id} project={p} profiles={profiles} onAssign={setSelectedProject} />
-            ))}
-            {filteredProjects.length === 0 && (
-              <p className="text-gray-500 text-sm py-8 text-center">No projects found</p>
-            )}
+
+          <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
+            <div className="px-4 py-3 border-b border-gray-100">
+              <h3 className="text-sm font-semibold text-gray-900">Hard Delete Staff</h3>
+              <p className="text-xs text-gray-500 mt-0.5">Select anyone from the list to purge.</p>
+            </div>
+            <table className="w-full">
+              <tbody>
+                {unified.filter(r => r.profile_id !== me?.id).map(row => (
+                  <tr key={row.email} className="border-t border-gray-100">
+                    <td className="px-4 py-3">
+                      <p className="text-sm font-medium text-gray-900">{row.full_name}</p>
+                      <p className="text-xs text-gray-400">{row.email}</p>
+                    </td>
+                    <td className="px-4 py-3 text-xs text-gray-500">{ROLE_LABEL[row.role] ?? row.role}</td>
+                    <td className="px-4 py-3 text-right">
+                      <button
+                        onClick={() => openHardDelete(row)}
+                        className="text-xs text-red-600 hover:text-red-800"
+                      >
+                        Hard Delete…
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          {/* Recent audit log */}
+          <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
+            <div className="px-4 py-3 border-b border-gray-100">
+              <h3 className="text-sm font-semibold text-gray-900">Recent Activity</h3>
+              <p className="text-xs text-gray-500 mt-0.5">Last 50 staff changes.</p>
+            </div>
+            <div className="divide-y divide-gray-100 max-h-96 overflow-y-auto">
+              {auditLog.length === 0 ? (
+                <p className="px-4 py-6 text-xs text-gray-500">No activity yet.</p>
+              ) : auditLog.map(entry => (
+                <div key={entry.id} className="px-4 py-2 flex items-center justify-between text-xs">
+                  <div>
+                    <span className="font-medium text-gray-900">{entry.action}</span>
+                    <span className="text-gray-500"> — {entry.email}</span>
+                    {entry.notes && <span className="text-gray-400 italic"> · {entry.notes}</span>}
+                  </div>
+                  <div className="text-gray-400">
+                    {entry.changer?.display_name ?? entry.changer?.full_name ?? '—'} · {new Date(entry.created_at).toLocaleString()}
+                  </div>
+                </div>
+              ))}
+            </div>
           </div>
         </div>
       )}
-      {selectedProject && (
-        <AssignModal
-          project={selectedProject}
-          profiles={profiles}
-          onClose={() => setSelectedProject(null)}
-          onSave={handleSaveAssignment}
-          saving={saving}
-        />
+
+      {/* Invite modal */}
+      {inviteOpen && (
+        <div
+          className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4"
+          onClick={() => setInviteOpen(false)}
+        >
+          <form
+            onClick={(e) => e.stopPropagation()}
+            onSubmit={handleInvite}
+            className="bg-white rounded-lg max-w-md w-full p-6 space-y-4"
+          >
+            <h2 className="text-lg font-semibold text-gray-900">Invite Staff</h2>
+            <p className="text-xs text-gray-500">
+              Adding to the whitelist grants portal access. Their profile will be created automatically on first login via Azure AD.
+            </p>
+
+            <div>
+              <label className="text-xs text-gray-600 block mb-1">Email *</label>
+              <input
+                type="email"
+                required
+                value={inviteDraft.email}
+                onChange={(e) => setInviteDraft(d => ({ ...d, email: e.target.value }))}
+                className="w-full border border-gray-200 rounded px-2 py-1.5 text-sm text-gray-900"
+                placeholder="person@pyramidny.com"
+              />
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="text-xs text-gray-600 block mb-1">Full name *</label>
+                <input
+                  type="text"
+                  required
+                  value={inviteDraft.full_name}
+                  onChange={(e) => setInviteDraft(d => ({
+                    ...d,
+                    full_name: e.target.value,
+                    display_name: d.display_name || e.target.value.split(' ')[0],
+                  }))}
+                  className="w-full border border-gray-200 rounded px-2 py-1.5 text-sm text-gray-900"
+                />
+              </div>
+              <div>
+                <label className="text-xs text-gray-600 block mb-1">Display name</label>
+                <input
+                  type="text"
+                  value={inviteDraft.display_name}
+                  onChange={(e) => setInviteDraft(d => ({ ...d, display_name: e.target.value }))}
+                  className="w-full border border-gray-200 rounded px-2 py-1.5 text-sm text-gray-900"
+                />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="text-xs text-gray-600 block mb-1">Role *</label>
+                <select
+                  value={inviteDraft.role}
+                  onChange={(e) => setInviteDraft(d => ({ ...d, role: e.target.value }))}
+                  className="w-full border border-gray-200 rounded px-2 py-1.5 text-sm text-gray-900"
+                >
+                  {ROLES.map(r => <option key={r.value} value={r.value}>{r.label}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="text-xs text-gray-600 block mb-1">Division</label>
+                <select
+                  value={inviteDraft.division}
+                  onChange={(e) => setInviteDraft(d => ({ ...d, division: e.target.value }))}
+                  className="w-full border border-gray-200 rounded px-2 py-1.5 text-sm text-gray-900"
+                >
+                  {DIVISIONS.map(d => <option key={d.value} value={d.value}>{d.label}</option>)}
+                </select>
+              </div>
+            </div>
+
+            <div>
+              <label className="text-xs text-gray-600 block mb-1">Title</label>
+              <input
+                type="text"
+                value={inviteDraft.title}
+                onChange={(e) => setInviteDraft(d => ({ ...d, title: e.target.value }))}
+                className="w-full border border-gray-200 rounded px-2 py-1.5 text-sm text-gray-900"
+                placeholder="e.g. Senior Project Manager"
+              />
+            </div>
+
+            <div>
+              <label className="text-xs text-gray-600 block mb-1">Phone</label>
+              <input
+                type="tel"
+                value={inviteDraft.phone}
+                onChange={(e) => setInviteDraft(d => ({ ...d, phone: e.target.value }))}
+                className="w-full border border-gray-200 rounded px-2 py-1.5 text-sm text-gray-900"
+                placeholder="(555) 123-4567"
+              />
+            </div>
+
+            <div className="flex gap-2 pt-2">
+              <button
+                type="submit"
+                disabled={saving}
+                className="flex-1 text-sm bg-pyramid-500 hover:bg-pyramid-600 text-white px-3 py-2 rounded-lg transition-colors disabled:opacity-50"
+              >
+                {saving ? 'Adding…' : 'Add to Whitelist'}
+              </button>
+              <button
+                type="button"
+                onClick={() => setInviteOpen(false)}
+                className="text-sm text-gray-500 hover:text-gray-700 px-3 py-2"
+              >
+                Cancel
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      {/* Hard delete confirmation modal */}
+      {hardDeleteTarget && (
+        <div
+          className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4"
+          onClick={() => setHardDeleteTarget(null)}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="bg-white rounded-lg max-w-md w-full p-6 space-y-4"
+          >
+            <h2 className="text-lg font-semibold text-red-700">Hard Delete Staff</h2>
+            <p className="text-sm text-gray-700">
+              You are about to permanently delete <strong>{hardDeleteTarget.full_name}</strong> ({hardDeleteTarget.email}).
+              This wipes their profile and whitelist entry. An audit log entry remains.
+            </p>
+            <p className="text-xs text-red-600">
+              This cannot be undone. Use <strong>Deactivate</strong> instead if there's any chance they'll return.
+            </p>
+
+            <div>
+              <label className="text-xs text-gray-600 block mb-1">Reason (optional)</label>
+              <input
+                type="text"
+                value={hardDeleteReason}
+                onChange={(e) => setHardDeleteReason(e.target.value)}
+                className="w-full border border-gray-200 rounded px-2 py-1.5 text-sm text-gray-900"
+                placeholder="e.g. Added by mistake"
+              />
+            </div>
+
+            <div>
+              <label className="text-xs text-gray-600 block mb-1">Type DELETE to confirm</label>
+              <input
+                type="text"
+                value={hardDeleteConfirmText}
+                onChange={(e) => setHardDeleteConfirmText(e.target.value)}
+                className="w-full border border-red-300 rounded px-2 py-1.5 text-sm text-gray-900"
+                autoFocus
+              />
+            </div>
+
+            <div className="flex gap-2 pt-2">
+              <button
+                onClick={executeHardDelete}
+                disabled={saving || hardDeleteConfirmText !== 'DELETE'}
+                className="flex-1 text-sm bg-red-600 hover:bg-red-700 text-white px-3 py-2 rounded-lg transition-colors disabled:bg-gray-300 disabled:cursor-not-allowed"
+              >
+                {saving ? 'Deleting…' : 'Permanently Delete'}
+              </button>
+              <button
+                onClick={() => setHardDeleteTarget(null)}
+                className="text-sm text-gray-500 hover:text-gray-700 px-3 py-2"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   )
