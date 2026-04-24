@@ -179,14 +179,43 @@ async function writeAudit(
   }
 }
 
-// Look up the caller's profile by azure_oid (JWT sub/oid claim)
-async function lookupCallerProfile(userId: string) {
-  const { data } = await supabase
+// Look up the caller's profile — try azure_oid first, fall back to email from JWT.
+// Seed admin profiles were inserted manually and don't have azure_oid populated
+// until their first login. This fallback unblocks them AND backfills azure_oid
+// so subsequent calls hit the fast path.
+async function lookupCallerProfile(userId: string, jwtPayload: Record<string, unknown>) {
+  // Try azure_oid first (fast path for users whose profile was created by the trigger)
+  const { data: byOid } = await supabase
     .from("profiles")
-    .select("id, email, role, is_active")
+    .select("id, email, role, is_active, azure_oid")
     .eq("azure_oid", userId)
     .maybeSingle();
-  return data;
+  if (byOid) return byOid;
+
+  // Fallback: look up by email claim from the JWT
+  const email = (jwtPayload.email
+                 ?? jwtPayload.preferred_username
+                 ?? jwtPayload.upn
+                 ?? jwtPayload.unique_name) as string | undefined;
+  if (!email) return null;
+
+  const normalizedEmail = String(email).toLowerCase().trim();
+  const { data: byEmail } = await supabase
+    .from("profiles")
+    .select("id, email, role, is_active, azure_oid")
+    .ilike("email", normalizedEmail)
+    .maybeSingle();
+  if (!byEmail) return null;
+
+  // Backfill azure_oid for next time
+  if (!byEmail.azure_oid) {
+    await supabase.from("profiles")
+      .update({ azure_oid: userId, updated_at: new Date().toISOString() })
+      .eq("id", byEmail.id);
+    byEmail.azure_oid = userId;
+  }
+
+  return byEmail;
 }
 
 // ============================================================================
@@ -496,7 +525,7 @@ serve(async (req) => {
     // UPSERT WHITELIST — invite a new person or update existing whitelist row
     // ------------------------------------------------------------------------
     if (action === "upsert_whitelist") {
-      const caller = await lookupCallerProfile(userId);
+      const caller = await lookupCallerProfile(userId, payload);
       if (!caller || caller.role !== "admin") {
         return json({ error: "Admin only" }, 403);
       }
@@ -565,7 +594,7 @@ serve(async (req) => {
     // UPDATE PROFILE — change role, division, etc. for an existing user
     // ------------------------------------------------------------------------
     if (action === "update_profile") {
-      const caller = await lookupCallerProfile(userId);
+      const caller = await lookupCallerProfile(userId, payload);
       if (!caller || caller.role !== "admin") {
         return json({ error: "Admin only" }, 403);
       }
@@ -618,7 +647,7 @@ serve(async (req) => {
     // User can still be reactivated from the Inactive Staff tab.
     // ------------------------------------------------------------------------
     if (action === "deactivate_staff") {
-      const caller = await lookupCallerProfile(userId);
+      const caller = await lookupCallerProfile(userId, payload);
       if (!caller || caller.role !== "admin") {
         return json({ error: "Admin only" }, 403);
       }
@@ -650,7 +679,7 @@ serve(async (req) => {
     // REACTIVATE STAFF — restore a previously-deactivated person
     // ------------------------------------------------------------------------
     if (action === "reactivate_staff") {
-      const caller = await lookupCallerProfile(userId);
+      const caller = await lookupCallerProfile(userId, payload);
       if (!caller || caller.role !== "admin") {
         return json({ error: "Admin only" }, 403);
       }
@@ -680,7 +709,7 @@ serve(async (req) => {
     // Requires confirm=true in body (caller UI must collect explicit confirmation).
     // ------------------------------------------------------------------------
     if (action === "hard_delete_staff") {
-      const caller = await lookupCallerProfile(userId);
+      const caller = await lookupCallerProfile(userId, payload);
       if (!caller || caller.role !== "admin") {
         return json({ error: "Admin only" }, 403);
       }
