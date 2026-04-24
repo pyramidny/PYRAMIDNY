@@ -224,20 +224,44 @@ export default function ProjectDetail() {
   }
 
   const uploadFile = async (e) => {
-    if (!project?.sharepoint_folder_id) return
+    if (!project?.id) return
+    const file = e.target.files[0]
+    if (!file) return
     setUploading(true)
     try {
-      const file = e.target.files[0]
-      if (!file) return
+      // Read file → base64 in chunks. The naive
+      // `btoa(String.fromCharCode(...new Uint8Array(buf)))` approach
+      // hits "Maximum call stack size exceeded" for any file over ~100KB
+      // because the spread operator passes every byte as a separate argument.
       const buf = await file.arrayBuffer()
-      const b64 = btoa(String.fromCharCode(...new Uint8Array(buf)))
+      const bytes = new Uint8Array(buf)
+      const CHUNK = 0x8000 // 32KB per chunk — safely under JS argument limit
+      let binary = ''
+      for (let i = 0; i < bytes.length; i += CHUNK) {
+        binary += String.fromCharCode.apply(null, bytes.subarray(i, i + CHUNK))
+      }
+      const b64 = btoa(binary)
+
+      // Read the Microsoft Graph provider token so project-proxy can
+      // write to SharePoint. The proxy forwards it as the user's own token.
+      let providerToken = null
+      try {
+        const raw = localStorage.getItem(SP_TOKEN_KEY)
+        providerToken = raw ? JSON.parse(raw)?.provider_token : null
+      } catch { /* ignore */ }
+
       await proxy({
         action: 'upload_file',
-        folderId: project.sharepoint_folder_id,
+        projectId: project.id,
+        category: 'Files/Other',       // TODO Batch 2b: let user pick category
         fileName: file.name,
         fileContent: b64,
+        document_type: null,
+        providerToken,
       })
-      await sp.loadFolder(project.sharepoint_folder_id)
+      if (sp?.loadFolder && project.sharepoint_folder_id) {
+        await sp.loadFolder(project.sharepoint_folder_id)
+      }
     } catch (err) {
       alert('Upload failed: ' + err.message)
     } finally {
