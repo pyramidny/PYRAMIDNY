@@ -1,12 +1,15 @@
 // src/pages/NewProject.jsx
 // Route: /projects/new
-// Writes via: Supabase Edge Function (create-project)
-// The Edge Function uses the service_role key to bypass RLS.
+// Writes via: project-proxy Edge Function, action='insert'
+// Passes both Supabase JWT (for auth) and Microsoft Graph provider_token
+// (for SharePoint folder creation).
 
-import { useAuth } from '@/context/AuthContext'
-import { supabase } from '@/lib/supabase'
 import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
+import { useAuth } from '@/context/AuthContext'
+
+const PROXY_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/project-proxy`
+const SB_TOKEN_KEY = 'sb-izjaxmcdlsdkdliqjlei-auth-token'
 
 const SCOPE_TYPES = [
   'Facade Repairs',
@@ -49,13 +52,23 @@ const EMPTY = {
   architect_engineer:     '',
   bid_amount:             '',
   notes:                  '',
-  // ── Section 4 — Timeline ──────────────────────────
-  walkthrough_date:       '',
-  due_date:               '',
-  bid_submitted:          false,
 }
 
-// ── Reusable primitives ───────────────────────────────────────────────────────
+// Pull both the Supabase JWT and Microsoft Graph provider_token from localStorage.
+// Azure AD PKCE flow stores both there; the provider_token is what SharePoint needs.
+function getAuthTokens() {
+  try {
+    const raw = localStorage.getItem(SB_TOKEN_KEY)
+    if (!raw) return { accessToken: null, providerToken: null }
+    const parsed = JSON.parse(raw)
+    return {
+      accessToken:   parsed?.access_token ?? null,
+      providerToken: parsed?.provider_token ?? null,
+    }
+  } catch {
+    return { accessToken: null, providerToken: null }
+  }
+}
 
 function Label({ children, required }) {
   return (
@@ -68,37 +81,7 @@ function Label({ children, required }) {
 function Input({ error, className = '', ...props }) {
   return (
     <input
-      className={`
-        w-full bg-stone-900 border rounded-sm px-3 py-2.5 text-stone-100
-        text-sm placeholder-stone-600 outline-none transition-colors
-        ${error
-          ? 'border-red-500 focus:border-red-400'
-          : 'border-stone-700 focus:border-amber-500'}
-        ${className}
-      `}
-      {...props}
-    />
-  )
-}
-
-// Date input — native picker styled for dark theme.
-// color-scheme:dark makes the calendar popup dark on supported browsers.
-function DateInput({ error, className = '', ...props }) {
-  return (
-    <input
-      type="date"
-      style={{ colorScheme: 'dark' }}
-      className={`
-        w-full bg-stone-900 border rounded-sm px-3 py-2.5 text-stone-100
-        text-sm outline-none transition-colors
-        [&::-webkit-calendar-picker-indicator]:opacity-40
-        [&::-webkit-calendar-picker-indicator]:invert
-        [&::-webkit-calendar-picker-indicator]:cursor-pointer
-        ${error
-          ? 'border-red-500 focus:border-red-400'
-          : 'border-stone-700 focus:border-amber-500'}
-        ${className}
-      `}
+      className={`w-full bg-stone-900 border rounded-sm px-3 py-2.5 text-stone-100 text-sm placeholder-stone-600 outline-none transition-colors ${error ? 'border-red-500 focus:border-red-400' : 'border-stone-700 focus:border-amber-500'} ${className}`}
       {...props}
     />
   )
@@ -107,14 +90,7 @@ function DateInput({ error, className = '', ...props }) {
 function Select({ error, children, className = '', ...props }) {
   return (
     <select
-      className={`
-        w-full bg-stone-900 border rounded-sm px-3 py-2.5 text-stone-100
-        text-sm outline-none transition-colors appearance-none cursor-pointer
-        ${error
-          ? 'border-red-500 focus:border-red-400'
-          : 'border-stone-700 focus:border-amber-500'}
-        ${className}
-      `}
+      className={`w-full bg-stone-900 border rounded-sm px-3 py-2.5 text-stone-100 text-sm outline-none transition-colors appearance-none cursor-pointer ${error ? 'border-red-500 focus:border-red-400' : 'border-stone-700 focus:border-amber-500'} ${className}`}
       {...props}
     >
       {children}
@@ -126,50 +102,9 @@ function Textarea({ error, className = '', ...props }) {
   return (
     <textarea
       rows={4}
-      className={`
-        w-full bg-stone-900 border rounded-sm px-3 py-2.5 text-stone-100
-        text-sm placeholder-stone-600 outline-none transition-colors resize-none
-        ${error
-          ? 'border-red-500 focus:border-red-400'
-          : 'border-stone-700 focus:border-amber-500'}
-        ${className}
-      `}
+      className={`w-full bg-stone-900 border rounded-sm px-3 py-2.5 text-stone-100 text-sm placeholder-stone-600 outline-none transition-colors resize-none ${error ? 'border-red-500 focus:border-red-400' : 'border-stone-700 focus:border-amber-500'} ${className}`}
       {...props}
     />
-  )
-}
-
-// Toggle switch for boolean fields (bid_submitted)
-function Toggle({ checked, onChange, label, hint }) {
-  return (
-    <button
-      type="button"
-      role="switch"
-      aria-checked={checked}
-      onClick={() => onChange(!checked)}
-      className="flex items-center justify-between w-full group"
-    >
-      <div className="text-left">
-        <span className="text-sm text-stone-300 group-hover:text-stone-100 transition-colors">
-          {label}
-        </span>
-        {hint && (
-          <p className="text-xs text-stone-600 mt-0.5">{hint}</p>
-        )}
-      </div>
-      <div className={`
-        relative flex-shrink-0 ml-4 w-10 h-5 rounded-full border transition-all duration-200
-        ${checked
-          ? 'bg-amber-500 border-amber-500'
-          : 'bg-stone-800 border-stone-700'}
-      `}>
-        <span className={`
-          absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white shadow-sm
-          transition-transform duration-200
-          ${checked ? 'translate-x-5' : 'translate-x-0'}
-        `} />
-      </div>
-    </button>
   )
 }
 
@@ -184,23 +119,16 @@ function Section({ number, title, children }) {
       <div className="absolute left-0 top-0 bottom-0 w-px bg-stone-700" />
       <div className="pl-6">
         <div className="flex items-center gap-3 mb-5">
-          <span className="flex-shrink-0 w-6 h-6 rounded-full bg-amber-500 text-stone-950
-                           text-xs font-bold flex items-center justify-center">
+          <span className="flex-shrink-0 w-6 h-6 rounded-full bg-amber-500 text-stone-950 text-xs font-bold flex items-center justify-center">
             {number}
           </span>
-          <h2 className="text-sm font-semibold tracking-widest uppercase text-stone-300">
-            {title}
-          </h2>
+          <h2 className="text-sm font-semibold tracking-widest uppercase text-stone-300">{title}</h2>
         </div>
-        <div className="space-y-4">
-          {children}
-        </div>
+        <div className="space-y-4">{children}</div>
       </div>
     </div>
   )
 }
-
-// ── Page component ────────────────────────────────────────────────────────────
 
 export default function NewProject() {
   const navigate = useNavigate()
@@ -210,6 +138,7 @@ export default function NewProject() {
   const [errors, setErrors]       = useState({})
   const [saving, setSaving]       = useState(false)
   const [serverErr, setServerErr] = useState(null)
+  const [saveMeta, setSaveMeta]   = useState(null)
 
   const set = (field) => (e) =>
     setForm((prev) => ({ ...prev, [field]: e.target.value }))
@@ -222,9 +151,9 @@ export default function NewProject() {
   const validate = () => {
     const errs = {}
     if (!form.project_address.trim()) errs.project_address = 'Project address is required.'
-    if (!form.scope_type)             errs.scope_type      = 'Select a scope type.'
+    if (!form.scope_type)              errs.scope_type      = 'Select a scope type.'
     if (form.bid_amount && isNaN(Number(form.bid_amount)))
-                                      errs.bid_amount      = 'Enter a numeric value.'
+                                       errs.bid_amount      = 'Enter a numeric value.'
     return errs
   }
 
@@ -235,36 +164,49 @@ export default function NewProject() {
 
     setSaving(true)
     setServerErr(null)
+    setSaveMeta(null)
 
     try {
-      const { data: { session } } = await supabase.auth.getSession()
-      const token = session?.access_token
+      const { accessToken, providerToken } = getAuthTokens()
 
-      const { data, error } = await supabase.functions.invoke('create-project', {
-        body: {
-          division:               form.division,
-          status:                 form.status,
-          project_address:        form.project_address.trim(),
-          scope_type:             form.scope_type || null,
-          property_manager_owner: form.property_manager_owner.trim() || null,
-          architect_engineer:     form.architect_engineer.trim() || null,
-          bid_amount:             form.bid_amount ? Number(form.bid_amount) : null,
-          notes:                  form.notes.trim() || null,
-          // ── Timeline fields ────────────────────────────────────────────
-          walkthrough_date:       form.walkthrough_date || null,
-          due_date:               form.due_date || null,
-          bid_submitted:          form.bid_submitted,
+      const res = await fetch(PROXY_URL, {
+        method: 'POST',
+        headers: {
+          'Content-Type':  'application/json',
+          'Authorization': `Bearer ${accessToken}`,
         },
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
+        body: JSON.stringify({
+          action: 'insert',
+          providerToken,
+          project: {
+            division:               form.division,
+            status:                 form.status,
+            project_address:        form.project_address.trim(),
+            scope_type:             form.scope_type || null,
+            property_manager_owner: form.property_manager_owner.trim() || null,
+            architect_engineer:     form.architect_engineer.trim() || null,
+            bid_amount:             form.bid_amount ? Number(form.bid_amount) : null,
+            notes:                  form.notes.trim() || null,
+          },
+        }),
       })
 
-      if (error) {
-        console.error('Edge Function error:', error)
-        setServerErr(error.message ?? 'Save failed')
+      const json = await res.json()
+
+      if (!res.ok) {
+        console.error('Proxy insert error:', json)
+        setServerErr(json.error ?? `Save failed (${res.status})`)
         return
       }
 
-      navigate(data?.id ? `/projects/${data.id}` : '/projects')
+      // Log success meta (tasks seeded, SP folder, etc.) for debugging.
+      // If SP folder failed, we still navigate — project exists, folder can be backfilled.
+      if (json.meta) {
+        console.log('[NewProject] created:', json.meta)
+        setSaveMeta(json.meta)
+      }
+
+      navigate(json.data?.id ? `/projects/${json.data.id}` : '/projects')
 
     } catch (err) {
       console.error('Unexpected error:', err)
@@ -277,15 +219,10 @@ export default function NewProject() {
   return (
     <div className="min-h-screen bg-stone-950 text-stone-100">
 
-      {/* ── Page header ── */}
       <div className="border-b border-stone-800 bg-stone-950 sticky top-0 z-10">
         <div className="max-w-3xl mx-auto px-6 py-4 flex items-center justify-between gap-4">
           <div className="flex items-center gap-4">
-            <Link
-              to="/projects"
-              className="text-stone-500 hover:text-stone-300 transition-colors"
-              title="Back to projects"
-            >
+            <Link to="/projects" className="text-stone-500 hover:text-stone-300 transition-colors" title="Back to projects">
               <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M10 19l-7-7m0 0l7-7m-7 7h18" />
               </svg>
@@ -303,11 +240,7 @@ export default function NewProject() {
                   key={div}
                   type="button"
                   onClick={() => setForm((p) => ({ ...p, division: div }))}
-                  className={`px-3 py-2 transition-colors ${
-                    form.division === div
-                      ? 'bg-amber-500 text-stone-950'
-                      : 'text-stone-400 hover:text-stone-200'
-                  }`}
+                  className={`px-3 py-2 transition-colors ${form.division === div ? 'bg-amber-500 text-stone-950' : 'text-stone-400 hover:text-stone-200'}`}
                 >
                   {div === 'regular' ? 'Regular' : 'IRA'}
                 </button>
@@ -334,11 +267,9 @@ export default function NewProject() {
         </div>
       </div>
 
-      {/* ── Form body ── */}
       <div className="max-w-3xl mx-auto px-6 py-10">
         <form onSubmit={handleSubmit} noValidate>
 
-          {/* Project address — top-level, outside sections */}
           <div className="mb-10">
             <Label required>Project Address</Label>
             <Input
@@ -354,7 +285,6 @@ export default function NewProject() {
 
           <div className="space-y-10">
 
-            {/* ── Section 1: Scope ── */}
             <Section number="1" title="Scope">
               <div>
                 <Label required>Scope Type</Label>
@@ -387,7 +317,6 @@ export default function NewProject() {
               </div>
             </Section>
 
-            {/* ── Section 2: Contacts ── */}
             <Section number="2" title="Contacts">
               <div>
                 <Label>Property Manager / Owner</Label>
@@ -409,14 +338,11 @@ export default function NewProject() {
               </div>
             </Section>
 
-            {/* ── Section 3: Bid Amount ── */}
             <Section number="3" title="Bid Amount">
               <div className="max-w-xs">
                 <Label>Bid Amount</Label>
                 <div className="relative">
-                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-stone-400 text-sm font-medium">
-                    $
-                  </span>
+                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-stone-400 text-sm font-medium">$</span>
                   <Input
                     type="text"
                     inputMode="decimal"
@@ -432,37 +358,6 @@ export default function NewProject() {
               </div>
             </Section>
 
-            {/* ── Section 4: Timeline ── */}
-            <Section number="4" title="Timeline">
-              {/* Date row — two pickers side by side */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div>
-                  <Label>Walkthrough Date</Label>
-                  <DateInput
-                    value={form.walkthrough_date}
-                    onChange={set('walkthrough_date')}
-                  />
-                </div>
-                <div>
-                  <Label>Bid Due Date</Label>
-                  <DateInput
-                    value={form.due_date}
-                    onChange={set('due_date')}
-                  />
-                </div>
-              </div>
-
-              {/* Bid submitted toggle */}
-              <div className="pt-1 pb-1 border-t border-stone-800">
-                <Toggle
-                  checked={form.bid_submitted}
-                  onChange={(val) => setForm((p) => ({ ...p, bid_submitted: val }))}
-                  label="Bid Already Submitted"
-                  hint="Toggle on if the bid package has been sent to the client."
-                />
-              </div>
-            </Section>
-
           </div>
 
           {serverErr && (
@@ -472,26 +367,17 @@ export default function NewProject() {
           )}
 
           <div className="mt-10 pt-8 border-t border-stone-800 flex items-center justify-between gap-4">
-            <Link
-              to="/projects"
-              className="text-sm text-stone-500 hover:text-stone-300 transition-colors"
-            >
-              Cancel
-            </Link>
+            <Link to="/projects" className="text-sm text-stone-500 hover:text-stone-300 transition-colors">Cancel</Link>
             <button
               type="submit"
               disabled={saving}
-              className="px-6 py-2.5 text-sm font-semibold rounded-sm
-                         bg-amber-500 hover:bg-amber-400 text-stone-950
-                         transition-colors disabled:opacity-60 flex items-center gap-2"
+              className="px-6 py-2.5 text-sm font-semibold rounded-sm bg-amber-500 hover:bg-amber-400 text-stone-950 transition-colors disabled:opacity-60 flex items-center gap-2"
             >
               {saving ? (
                 <>
                   <svg className="animate-spin w-4 h-4" viewBox="0 0 24 24" fill="none">
-                    <circle className="opacity-25" cx="12" cy="12" r="10"
-                            stroke="currentColor" strokeWidth="4"/>
-                    <path className="opacity-75" fill="currentColor"
-                          d="M4 12a8 8 0 018-8v4l3-3-3-3v4a8 8 0 00-8 8h4z"/>
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4l3-3-3-3v4a8 8 0 00-8 8h4z"/>
                   </svg>
                   Saving…
                 </>
