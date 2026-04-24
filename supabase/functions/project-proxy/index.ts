@@ -81,7 +81,7 @@ serve(async (req) => {
     if (!userId) return json({ error: "No user identity in token" }, 401);
 
     const body = await req.json();
-    const { action, project, projectId, id, updates, taskId, providerToken } = body;
+    const { action, project, projectId, id, updates, taskId, milestoneId, providerToken } = body;
 
     // -- INSERT PROJECT -------------------------------------------------------
     if (action === "insert") {
@@ -145,6 +145,48 @@ serve(async (req) => {
       const { data, error } = await supabase.from("project_tasks")
         .update({ ...updates, updated_at: new Date().toISOString() })
         .eq("id", taskId).select().single();
+      if (error) return json({ error: error.message }, 400);
+      return json({ data });
+    }
+
+    // -- UPDATE MILESTONE -----------------------------------------------------
+    // Accepts updates to: value (enum: Yes|No|Missing|N/A), milestone_date, notes
+    // Always stamps updated_by with the Azure AD user id and updated_at = now()
+    if (action === "update_milestone") {
+      if (!milestoneId) return json({ error: "milestoneId required" }, 400);
+      if (!updates || typeof updates !== "object") {
+        return json({ error: "updates object required" }, 400);
+      }
+
+      // Whitelist allowed fields — never let the client pass arbitrary columns
+      const allowed: Record<string, unknown> = {};
+      if (updates.value !== undefined) {
+        const validValues = ["Yes", "No", "Missing", "N/A"];
+        if (!validValues.includes(updates.value)) {
+          return json({ error: `Invalid value '${updates.value}'. Must be one of: ${validValues.join(", ")}` }, 400);
+        }
+        allowed.value = updates.value;
+      }
+      if (updates.milestone_date !== undefined) {
+        // Accept null (to clear) or ISO date string
+        allowed.milestone_date = updates.milestone_date || null;
+      }
+      if (updates.notes !== undefined) {
+        allowed.notes = updates.notes || null;
+      }
+
+      if (Object.keys(allowed).length === 0) {
+        return json({ error: "No valid fields to update" }, 400);
+      }
+
+      allowed.updated_by = userId;
+      allowed.updated_at = new Date().toISOString();
+
+      const { data, error } = await supabase.from("project_milestones")
+        .update(allowed)
+        .eq("id", milestoneId)
+        .select("*, milestone_definitions(label, key, sort_order, active_from_stage)")
+        .single();
       if (error) return json({ error: error.message }, 400);
       return json({ data });
     }

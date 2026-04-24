@@ -15,6 +15,16 @@ const STATUS_COLORS = {
   cancelled: 'bg-red-100 text-red-700',
 }
 
+// milestone_value enum in DB: Yes | No | Missing | N/A
+const MILESTONE_VALUES = ['Yes', 'No', 'Missing', 'N/A']
+
+const MILESTONE_VALUE_STYLE = {
+  'Yes':     { dot: 'bg-green-500', pill: 'bg-green-100 text-green-700' },
+  'No':      { dot: 'bg-red-500',   pill: 'bg-red-100 text-red-700' },
+  'Missing': { dot: 'bg-amber-400', pill: 'bg-amber-100 text-amber-700' },
+  'N/A':     { dot: 'bg-gray-300',  pill: 'bg-gray-100 text-gray-600' },
+}
+
 function fileIcon(name = '') {
   const ext = name.split('.').pop()?.toLowerCase()
   return { pdf:'PDF', doc:'DOC', docx:'DOCX', xls:'XLS', xlsx:'XLSX', ppt:'PPT', pptx:'PPTX', jpg:'IMG', jpeg:'IMG', png:'IMG', zip:'ZIP', mp4:'VID' }[ext] ?? 'FILE'
@@ -24,6 +34,21 @@ function fmtBytes(b = 0) {
   if (b < 1024) return `${b} B`
   if (b < 1048576) return `${(b / 1024).toFixed(1)} KB`
   return `${(b / 1048576).toFixed(1)} MB`
+}
+
+// Normalize milestone date (stored as DATE in PG) for <input type="date">
+function toDateInput(d) {
+  if (!d) return ''
+  // Already ISO date (YYYY-MM-DD) or full ISO timestamp — trim to first 10 chars
+  return String(d).slice(0, 10)
+}
+
+function sortMilestones(list) {
+  return [...list].sort((a, b) => {
+    const sa = a.milestone_definitions?.sort_order ?? 999
+    const sb = b.milestone_definitions?.sort_order ?? 999
+    return sa - sb
+  })
 }
 
 export default function ProjectDetail() {
@@ -42,6 +67,10 @@ export default function ProjectDetail() {
   const [staffPool, setStaffPool] = useState([])
   const [editingTeam, setEditingTeam] = useState(false)
   const [teamDraft, setTeamDraft] = useState({ pm_id: null, assistant_pm_id: null })
+
+  // Milestone inline edit state: { [milestoneId]: { value, milestone_date, notes } }
+  const [msDraft, setMsDraft] = useState({})
+  const [msSaving, setMsSaving] = useState({}) // { [milestoneId]: bool }
 
   // Read Azure AD token directly from localStorage — session.access_token is null
   // for Microsoft-signed JWTs that Supabase cannot verify.
@@ -83,9 +112,9 @@ export default function ProjectDetail() {
         const { data: ms, error: mse } = await supabase
           .from('project_milestones')
           .select('*, milestone_definitions(label, key, sort_order, active_from_stage)')
-          .eq('project_id', id).order('updated_at')
+          .eq('project_id', id)
         if (mse) throw mse
-        setMilestones(ms ?? [])
+        setMilestones(sortMilestones(ms ?? []))
 
         const { data: tsk, error: te } = await supabase
           .from('project_tasks')
@@ -132,6 +161,65 @@ export default function ProjectDetail() {
       // Revert on failure
       setTasks(ts => ts.map(t => t.id === task.id ? { ...t, status: task.status } : t))
       alert('Failed to save task: ' + e.message)
+    }
+  }
+
+  // -- Milestone editing --------------------------------------------------
+  const startEditMilestone = (ms) => {
+    setMsDraft(d => ({
+      ...d,
+      [ms.id]: {
+        value: ms.value ?? 'Missing',
+        milestone_date: toDateInput(ms.milestone_date),
+        notes: ms.notes ?? '',
+      },
+    }))
+  }
+
+  const cancelEditMilestone = (msId) => {
+    setMsDraft(d => {
+      const next = { ...d }
+      delete next[msId]
+      return next
+    })
+  }
+
+  const updateMsDraft = (msId, patch) => {
+    setMsDraft(d => ({ ...d, [msId]: { ...d[msId], ...patch } }))
+  }
+
+  const saveMilestone = async (ms) => {
+    const draft = msDraft[ms.id]
+    if (!draft) return
+
+    const updates = {
+      value: draft.value,
+      milestone_date: draft.milestone_date || null,
+      notes: draft.notes?.trim() || null,
+    }
+
+    // Optimistic update
+    const prev = ms
+    setMilestones(list => list.map(m => m.id === ms.id ? { ...m, ...updates } : m))
+    setMsSaving(s => ({ ...s, [ms.id]: true }))
+
+    try {
+      const saved = await proxy({ action: 'update_milestone', milestoneId: ms.id, updates })
+      // Merge server response (keeps milestone_definitions join intact)
+      if (saved) {
+        setMilestones(list => sortMilestones(list.map(m => m.id === ms.id ? saved : m)))
+      }
+      cancelEditMilestone(ms.id)
+    } catch (e) {
+      // Revert
+      setMilestones(list => list.map(m => m.id === ms.id ? prev : m))
+      alert('Failed to save milestone: ' + e.message)
+    } finally {
+      setMsSaving(s => {
+        const next = { ...s }
+        delete next[ms.id]
+        return next
+      })
     }
   }
 
@@ -289,30 +377,132 @@ export default function ProjectDetail() {
       {activeTab === 'milestones' && (
         <div className="space-y-3">
           {milestones.length === 0 && <p className="text-sm text-gray-500">No milestones yet.</p>}
-          {milestones.map((ms) => (
-            <div key={ms.id} className="bg-white rounded-lg border border-gray-200 p-4 flex items-start gap-3">
-              <div className={`mt-1 w-3 h-3 rounded-full flex-shrink-0 ${
-                ms.status === 'complete' ? 'bg-green-500' : ms.status === 'in_progress' ? 'bg-blue-500' : 'bg-gray-300'}`}
-              />
-              <div className="flex-1 min-w-0">
-                <p className="text-sm font-medium text-gray-900">
-                  {ms.milestone_definitions?.label ?? ms.milestone_definitions?.key ?? 'Milestone'}
-                </p>
-                {ms.milestone_definitions?.key && (
-                  <p className="text-xs text-gray-400 mt-0.5">{ms.milestone_definitions.key}</p>
-                )}
-                {ms.target_date && (
-                  <p className="text-xs text-gray-400 mt-1">Target: {new Date(ms.target_date).toLocaleDateString()}</p>
+          {milestones.map((ms) => {
+            const isEditing = !!msDraft[ms.id]
+            const isSaving = !!msSaving[ms.id]
+            const value = ms.value ?? 'Missing'
+            const style = MILESTONE_VALUE_STYLE[value] ?? MILESTONE_VALUE_STYLE['Missing']
+            const isFutureStage =
+              ms.milestone_definitions?.active_from_stage != null &&
+              project.current_stage != null &&
+              ms.milestone_definitions.active_from_stage > project.current_stage
+
+            return (
+              <div
+                key={ms.id}
+                className={`bg-white rounded-lg border p-4 transition ${
+                  isEditing ? 'border-pyramid-400 ring-2 ring-pyramid-100' : 'border-gray-200'
+                } ${isFutureStage && !isEditing ? 'opacity-60' : ''}`}
+              >
+                {!isEditing ? (
+                  <div className="flex items-start gap-3">
+                    <div className={`mt-1 w-3 h-3 rounded-full flex-shrink-0 ${style.dot}`} />
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2">
+                        <p className="text-sm font-medium text-gray-900">
+                          {ms.milestone_definitions?.label ?? ms.milestone_definitions?.key ?? 'Milestone'}
+                        </p>
+                        {isFutureStage && (
+                          <span className="text-[10px] uppercase tracking-wide text-gray-400">
+                            Stage {ms.milestone_definitions.active_from_stage}
+                          </span>
+                        )}
+                      </div>
+                      {ms.milestone_definitions?.key && (
+                        <p className="text-xs text-gray-400 mt-0.5">{ms.milestone_definitions.key}</p>
+                      )}
+                      {ms.milestone_date && (
+                        <p className="text-xs text-gray-500 mt-1">
+                          Date: {new Date(ms.milestone_date).toLocaleDateString()}
+                        </p>
+                      )}
+                      {ms.notes && (
+                        <p className="text-xs text-gray-600 mt-1 whitespace-pre-wrap">{ms.notes}</p>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-2 flex-shrink-0">
+                      <span className={`text-xs px-2 py-0.5 rounded-full ${style.pill}`}>
+                        {value}
+                      </span>
+                      <button
+                        onClick={() => startEditMilestone(ms)}
+                        className="text-xs text-blue-600 hover:text-blue-800"
+                      >
+                        Edit
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    <div className="flex items-start justify-between">
+                      <div>
+                        <p className="text-sm font-medium text-gray-900">
+                          {ms.milestone_definitions?.label ?? ms.milestone_definitions?.key ?? 'Milestone'}
+                        </p>
+                        {ms.milestone_definitions?.key && (
+                          <p className="text-xs text-gray-400 mt-0.5">{ms.milestone_definitions.key}</p>
+                        )}
+                      </div>
+                      <div className="flex gap-2">
+                        <button
+                          onClick={() => saveMilestone(ms)}
+                          disabled={isSaving}
+                          className="text-xs text-green-600 hover:text-green-800 disabled:text-gray-400"
+                        >
+                          {isSaving ? 'Saving...' : 'Save'}
+                        </button>
+                        <button
+                          onClick={() => cancelEditMilestone(ms.id)}
+                          disabled={isSaving}
+                          className="text-xs text-gray-400 hover:text-gray-600"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div>
+                        <label className="text-xs text-gray-400 block mb-1">Value</label>
+                        <select
+                          value={msDraft[ms.id].value}
+                          onChange={(e) => updateMsDraft(ms.id, { value: e.target.value })}
+                          disabled={isSaving}
+                          className="w-full border border-gray-200 rounded px-2 py-1 text-sm text-gray-900"
+                        >
+                          {MILESTONE_VALUES.map(v => (
+                            <option key={v} value={v}>{v}</option>
+                          ))}
+                        </select>
+                      </div>
+                      <div>
+                        <label className="text-xs text-gray-400 block mb-1">Date</label>
+                        <input
+                          type="date"
+                          value={msDraft[ms.id].milestone_date}
+                          onChange={(e) => updateMsDraft(ms.id, { milestone_date: e.target.value })}
+                          disabled={isSaving}
+                          className="w-full border border-gray-200 rounded px-2 py-1 text-sm text-gray-900"
+                        />
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="text-xs text-gray-400 block mb-1">Notes</label>
+                      <textarea
+                        value={msDraft[ms.id].notes}
+                        onChange={(e) => updateMsDraft(ms.id, { notes: e.target.value })}
+                        disabled={isSaving}
+                        rows={2}
+                        className="w-full border border-gray-200 rounded px-2 py-1 text-sm text-gray-900 resize-y"
+                        placeholder="Optional notes..."
+                      />
+                    </div>
+                  </div>
                 )}
               </div>
-              <span className={`text-xs px-2 py-0.5 rounded-full capitalize ${
-                ms.status === 'complete' ? 'bg-green-100 text-green-700'
-                : ms.status === 'in_progress' ? 'bg-blue-100 text-blue-700'
-                : 'bg-gray-100 text-gray-600'}`}>
-                {ms.status ?? 'pending'}
-              </span>
-            </div>
-          ))}
+            )
+          })}
         </div>
       )}
 
