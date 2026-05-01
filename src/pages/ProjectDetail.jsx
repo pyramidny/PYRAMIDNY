@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/context/AuthContext'
+import { useCanDo } from '@/lib/permissions'
 
 const PROXY_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/project-proxy`
 const SP_TOKEN_KEY = 'sb-izjaxmcdlsdkdliqjlei-auth-token'
@@ -80,7 +81,8 @@ function isImageMime(mime = '') {
 export default function ProjectDetail() {
   const { id } = useParams()
   const navigate = useNavigate()
-  const { session } = useAuth()
+  const { session, profile } = useAuth()
+  const canDo = useCanDo()
 
   const [project, setProject] = useState(null)
   const [milestones, setMilestones] = useState([])
@@ -397,15 +399,17 @@ export default function ProjectDetail() {
             <div className="flex items-center justify-between mb-3">
               <p className="text-xs text-gray-400 uppercase tracking-wide">Team</p>
               {!editingTeam ? (
-                <button
-                  onClick={() => {
-                    setTeamDraft({ pm_id: project.pm_id, assistant_pm_id: project.assistant_pm_id })
-                    setEditingTeam(true)
-                  }}
-                  className="text-xs text-blue-600 hover:text-blue-800"
-                >
-                  Edit
-                </button>
+                canDo('assign_team') && (
+                  <button
+                    onClick={() => {
+                      setTeamDraft({ pm_id: project.pm_id, assistant_pm_id: project.assistant_pm_id })
+                      setEditingTeam(true)
+                    }}
+                    className="text-xs text-blue-600 hover:text-blue-800"
+                  >
+                    Edit
+                  </button>
+                )
               ) : (
                 <div className="flex gap-2">
                   <button onClick={saveTeamAssignment} className="text-xs text-green-600 hover:text-green-800">Save</button>
@@ -504,12 +508,14 @@ export default function ProjectDetail() {
                       <span className={`text-xs px-2 py-0.5 rounded-full ${style.pill}`}>
                         {value}
                       </span>
-                      <button
-                        onClick={() => startEditMilestone(ms)}
-                        className="text-xs text-blue-600 hover:text-blue-800"
-                      >
-                        Edit
-                      </button>
+                      {canDo('edit_milestones') && (
+                        <button
+                          onClick={() => startEditMilestone(ms)}
+                          className="text-xs text-blue-600 hover:text-blue-800"
+                        >
+                          Edit
+                        </button>
+                      )}
                     </div>
                   </div>
                 ) : (
@@ -589,60 +595,83 @@ export default function ProjectDetail() {
       {activeTab === 'tasks' && (
         <div className="space-y-2">
           {tasks.length === 0 && <p className="text-sm text-gray-500">No tasks yet.</p>}
-          {tasks.map((task) => (
-            <label key={task.id} className="flex items-start gap-3 bg-white rounded-lg border border-gray-200 p-3.5 cursor-pointer hover:bg-gray-50 transition-colors">
-              <input
-                type="checkbox"
-                checked={task.status === 'completed'}
-                onChange={() => toggleTask(task)}
-                className="mt-0.5 w-4 h-4 rounded border-gray-300 text-pyramid-500"
-              />
-              <div className="flex-1 min-w-0">
-                <p className={`text-sm ${task.status === 'completed' ? 'line-through text-gray-400' : 'text-gray-900'}`}>
-                  {task.task_name}
-                </p>
-                {task.due_date && (
-                  <p className="text-xs text-gray-400 mt-0.5">
-                    Due: {new Date(task.due_date).toLocaleDateString()}
+          {tasks.map((task) => {
+            // PMs/etc. can only check off tasks assigned to them. Admins can toggle any.
+            const isOwnTask = task.assigned_to_id && profile?.id && task.assigned_to_id === profile.id
+            const canToggle = canDo('edit_any_task') || isOwnTask
+            return (
+              <label
+                key={task.id}
+                className={`flex items-start gap-3 bg-white rounded-lg border border-gray-200 p-3.5 transition-colors ${
+                  canToggle ? 'cursor-pointer hover:bg-gray-50' : 'cursor-not-allowed opacity-70'
+                }`}
+              >
+                <input
+                  type="checkbox"
+                  checked={task.status === 'completed'}
+                  onChange={() => canToggle && toggleTask(task)}
+                  disabled={!canToggle}
+                  className="mt-0.5 w-4 h-4 rounded border-gray-300 text-pyramid-500 disabled:cursor-not-allowed"
+                />
+                <div className="flex-1 min-w-0">
+                  <p className={`text-sm ${task.status === 'completed' ? 'line-through text-gray-400' : 'text-gray-900'}`}>
+                    {task.task_name}
                   </p>
-                )}
-              </div>
-            </label>
-          ))}
+                  {task.due_date && (
+                    <p className="text-xs text-gray-400 mt-0.5">
+                      Due: {new Date(task.due_date).toLocaleDateString()}
+                    </p>
+                  )}
+                  {!canToggle && !canDo('edit_any_task') && (
+                    <p className="text-[10px] text-gray-400 mt-0.5 italic">Not assigned to you</p>
+                  )}
+                </div>
+              </label>
+            )
+          })}
         </div>
       )}
 
       {activeTab === 'documents' && (
         <>
-          {/* Upload bar */}
-          <div className="flex flex-wrap items-center gap-2 mb-4 pb-4 border-b border-gray-200">
-            <select
-              value={uploadCategory}
-              onChange={(e) => setUploadCategory(e.target.value)}
-              disabled={uploading}
-              className="text-sm border border-gray-200 rounded px-2 py-1.5 text-gray-900 bg-white"
-            >
-              {DOCUMENT_CATEGORIES.map(c => (
-                <option key={c.value} value={c.value}>{c.label}</option>
-              ))}
-            </select>
-
-            <label className={`cursor-pointer ${uploading ? 'opacity-60 cursor-wait' : ''}`}>
-              <input
-                type="file"
-                className="hidden"
-                onChange={(e) => uploadFile(e)}
+          {/* Upload bar — admin only */}
+          {canDo('upload_file') ? (
+            <div className="flex flex-wrap items-center gap-2 mb-4 pb-4 border-b border-gray-200">
+              <select
+                value={uploadCategory}
+                onChange={(e) => setUploadCategory(e.target.value)}
                 disabled={uploading}
-              />
-              <span className="inline-block text-xs bg-pyramid-500 text-white px-3 py-1.5 rounded-lg hover:bg-pyramid-600 transition-colors">
-                {uploading ? 'Uploading...' : 'Upload to ' + (DOCUMENT_CATEGORIES.find(c => c.value === uploadCategory)?.label ?? 'Other')}
-              </span>
-            </label>
+                className="text-sm border border-gray-200 rounded px-2 py-1.5 text-gray-900 bg-white"
+              >
+                {DOCUMENT_CATEGORIES.map(c => (
+                  <option key={c.value} value={c.value}>{c.label}</option>
+                ))}
+              </select>
 
-            <span className="text-xs text-gray-400 ml-auto">
-              {documents.filter(d => d.category?.startsWith('Files/')).length} document{documents.filter(d => d.category?.startsWith('Files/')).length !== 1 ? 's' : ''}
-            </span>
-          </div>
+              <label className={`cursor-pointer ${uploading ? 'opacity-60 cursor-wait' : ''}`}>
+                <input
+                  type="file"
+                  className="hidden"
+                  onChange={(e) => uploadFile(e)}
+                  disabled={uploading}
+                />
+                <span className="inline-block text-xs bg-pyramid-500 text-white px-3 py-1.5 rounded-lg hover:bg-pyramid-600 transition-colors">
+                  {uploading ? 'Uploading...' : 'Upload to ' + (DOCUMENT_CATEGORIES.find(c => c.value === uploadCategory)?.label ?? 'Other')}
+                </span>
+              </label>
+
+              <span className="text-xs text-gray-400 ml-auto">
+                {documents.filter(d => d.category?.startsWith('Files/')).length} document{documents.filter(d => d.category?.startsWith('Files/')).length !== 1 ? 's' : ''}
+              </span>
+            </div>
+          ) : (
+            <div className="flex items-center justify-between gap-2 mb-4 pb-4 border-b border-gray-200">
+              <p className="text-xs text-gray-400">View only — uploads managed by admins.</p>
+              <span className="text-xs text-gray-400">
+                {documents.filter(d => d.category?.startsWith('Files/')).length} document{documents.filter(d => d.category?.startsWith('Files/')).length !== 1 ? 's' : ''}
+              </span>
+            </div>
+          )}
 
           {/* Grouped by category */}
           {(() => {
@@ -684,13 +713,15 @@ export default function ProjectDetail() {
                                   : ''}
                               </p>
                             </a>
-                            <button
-                              onClick={() => deleteDocument(doc)}
-                              className="text-xs text-red-500 hover:text-red-700 flex-shrink-0"
-                              title="Delete"
-                            >
-                              Delete
-                            </button>
+                            {canDo('delete_file') && (
+                              <button
+                                onClick={() => deleteDocument(doc)}
+                                className="text-xs text-red-500 hover:text-red-700 flex-shrink-0"
+                                title="Delete"
+                              >
+                                Delete
+                              </button>
+                            )}
                           </div>
                         ))}
                       </div>
@@ -705,37 +736,46 @@ export default function ProjectDetail() {
 
       {activeTab === 'photos' && (
         <>
-          {/* Upload bar + category filter */}
-          <div className="flex flex-wrap items-center gap-2 mb-4 pb-4 border-b border-gray-200">
-            <select
-              value={uploadCategory.startsWith('Pictures/') ? uploadCategory : 'Pictures/Progress'}
-              onChange={(e) => setUploadCategory(e.target.value)}
-              disabled={uploading}
-              className="text-sm border border-gray-200 rounded px-2 py-1.5 text-gray-900 bg-white"
-            >
-              {PHOTO_CATEGORIES.map(c => (
-                <option key={c.value} value={c.value}>{c.label}</option>
-              ))}
-            </select>
-
-            <label className={`cursor-pointer ${uploading ? 'opacity-60 cursor-wait' : ''}`}>
-              <input
-                type="file"
-                accept="image/*"
-                capture="environment"
-                className="hidden"
-                onChange={(e) => uploadFile(e, uploadCategory.startsWith('Pictures/') ? uploadCategory : 'Pictures/Progress')}
+          {/* Upload bar — admin only */}
+          {canDo('upload_file') ? (
+            <div className="flex flex-wrap items-center gap-2 mb-4 pb-4 border-b border-gray-200">
+              <select
+                value={uploadCategory.startsWith('Pictures/') ? uploadCategory : 'Pictures/Progress'}
+                onChange={(e) => setUploadCategory(e.target.value)}
                 disabled={uploading}
-              />
-              <span className="inline-block text-xs bg-pyramid-500 text-white px-3 py-1.5 rounded-lg hover:bg-pyramid-600 transition-colors">
-                {uploading ? 'Uploading...' : '📷 Take / Upload Photo'}
-              </span>
-            </label>
+                className="text-sm border border-gray-200 rounded px-2 py-1.5 text-gray-900 bg-white"
+              >
+                {PHOTO_CATEGORIES.map(c => (
+                  <option key={c.value} value={c.value}>{c.label}</option>
+                ))}
+              </select>
 
-            <span className="text-xs text-gray-400 ml-auto">
-              {documents.filter(d => d.category?.startsWith('Pictures/')).length} photo{documents.filter(d => d.category?.startsWith('Pictures/')).length !== 1 ? 's' : ''}
-            </span>
-          </div>
+              <label className={`cursor-pointer ${uploading ? 'opacity-60 cursor-wait' : ''}`}>
+                <input
+                  type="file"
+                  accept="image/*"
+                  capture="environment"
+                  className="hidden"
+                  onChange={(e) => uploadFile(e, uploadCategory.startsWith('Pictures/') ? uploadCategory : 'Pictures/Progress')}
+                  disabled={uploading}
+                />
+                <span className="inline-block text-xs bg-pyramid-500 text-white px-3 py-1.5 rounded-lg hover:bg-pyramid-600 transition-colors">
+                  {uploading ? 'Uploading...' : '📷 Take / Upload Photo'}
+                </span>
+              </label>
+
+              <span className="text-xs text-gray-400 ml-auto">
+                {documents.filter(d => d.category?.startsWith('Pictures/')).length} photo{documents.filter(d => d.category?.startsWith('Pictures/')).length !== 1 ? 's' : ''}
+              </span>
+            </div>
+          ) : (
+            <div className="flex items-center justify-between gap-2 mb-4 pb-4 border-b border-gray-200">
+              <p className="text-xs text-gray-400">View only — photo uploads managed by admins.</p>
+              <span className="text-xs text-gray-400">
+                {documents.filter(d => d.category?.startsWith('Pictures/')).length} photo{documents.filter(d => d.category?.startsWith('Pictures/')).length !== 1 ? 's' : ''}
+              </span>
+            </div>
+          )}
 
           {/* Category filter buttons */}
           <div className="flex flex-wrap gap-1.5 mb-5">
@@ -816,14 +856,16 @@ export default function ProjectDetail() {
                       </p>
                     </div>
 
-                    {/* Delete button */}
-                    <button
-                      onClick={(e) => { e.stopPropagation(); deleteDocument(doc) }}
-                      className="absolute top-1 right-1 w-6 h-6 rounded-full bg-white/80 text-red-500 hover:bg-white hover:text-red-700 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center text-xs"
-                      title="Delete"
-                    >
-                      ×
-                    </button>
+                    {/* Delete button — admin only */}
+                    {canDo('delete_file') && (
+                      <button
+                        onClick={(e) => { e.stopPropagation(); deleteDocument(doc) }}
+                        className="absolute top-1 right-1 w-6 h-6 rounded-full bg-white/80 text-red-500 hover:bg-white hover:text-red-700 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center text-xs"
+                        title="Delete"
+                      >
+                        ×
+                      </button>
+                    )}
 
                     {/* Category badge */}
                     <span className="absolute top-1 left-1 text-[9px] bg-white/80 text-gray-700 px-1.5 py-0.5 rounded-full">

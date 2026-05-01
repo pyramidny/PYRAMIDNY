@@ -7,6 +7,7 @@
 import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useAuth } from '@/context/AuthContext'
+import { useCanDo } from '@/lib/permissions'
 
 const PROXY_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/project-proxy`
 const SB_TOKEN_KEY = 'sb-izjaxmcdlsdkdliqjlei-auth-token'
@@ -133,12 +134,31 @@ function Section({ number, title, children }) {
 export default function NewProject() {
   const navigate = useNavigate()
   const { user } = useAuth()
+  const canDo = useCanDo()
 
   const [form, setForm]           = useState(EMPTY)
   const [errors, setErrors]       = useState({})
   const [saving, setSaving]       = useState(false)
   const [serverErr, setServerErr] = useState(null)
   const [saveMeta, setSaveMeta]   = useState(null)
+
+  // Hard guard — if you somehow land here without permission, show a friendly
+  // message instead of letting you fill out a form that will 403 on save.
+  if (!canDo('create_project')) {
+    return (
+      <div className="max-w-md mx-auto mt-20 text-center px-6">
+        <h1 className="text-lg font-semibold text-gray-900 mb-2">
+          Not authorized to create projects
+        </h1>
+        <p className="text-sm text-gray-500 mb-6">
+          Only admins can create new projects. Please ask Jorge or another admin to add this one.
+        </p>
+        <Link to="/projects" className="text-sm text-pyramid-600 hover:text-pyramid-500">
+          ← Back to projects
+        </Link>
+      </div>
+    )
+  }
 
   const set = (field) => (e) =>
     setForm((prev) => ({ ...prev, [field]: e.target.value }))

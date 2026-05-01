@@ -1,5 +1,6 @@
 import { useAuth } from '@/context/AuthContext'
 import { supabase } from '@/lib/supabase'
+import { useCanDo } from '@/lib/permissions'
 import { Anchor, ChevronRight, HardHat, Plus, Search } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { Link, useLocation, useSearchParams } from 'react-router-dom'
@@ -25,7 +26,8 @@ const STAGE_LABELS = {
 }
 
 export function ProjectList() {
-  const { division: userDivision, isPM } = useAuth()
+  const { division: userDivision } = useAuth()
+  const canDo = useCanDo()
   const [searchParams, setSearchParams] = useSearchParams()
   const [projects, setProjects]   = useState([])
   const [loading, setLoading]     = useState(true)
@@ -83,7 +85,7 @@ export function ProjectList() {
           <h1 className="text-xl font-condensed font-bold text-ink-900 tracking-wide">
             Projects
           </h1>
-          {isPM && (
+          {canDo('create_project') && (
             <Link to="/projects/new" className="btn-primary">
               <Plus size={16} />
               New Project

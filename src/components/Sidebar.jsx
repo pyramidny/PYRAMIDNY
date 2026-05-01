@@ -41,14 +41,14 @@ const NAV_SECTIONS = [
   {
     heading: 'Manage',
     items: [
-      { to: '/team',     icon: Users,    label: 'Team',     elevated: true },
+      { to: '/team',     icon: Users,    label: 'Team',     adminOnly: true },
       { to: '/settings', icon: Settings, label: 'Settings' },
     ],
   },
 ]
 
 export function Sidebar({ onClose }) {
-  const { profile, signOut, isElevated } = useAuth()
+  const { profile, signOut, isAdmin } = useAuth()
   const navigate = useNavigate()
 
   const divInfo = DIVISION_LABELS[profile?.division] ?? DIVISION_LABELS[null]
@@ -78,7 +78,7 @@ export function Sidebar({ onClose }) {
       <nav className="flex-1 overflow-y-auto px-3 py-4 space-y-6">
         {NAV_SECTIONS.map((section, si) => {
           const visibleItems = section.items.filter(
-            item => !item.elevated || isElevated
+            item => !item.adminOnly || isAdmin
           )
           if (!visibleItems.length) return null
 
