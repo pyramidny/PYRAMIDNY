@@ -396,6 +396,102 @@ serve(async (req) => {
     }
 
     // ------------------------------------------------------------------------
+    // ASSIGN TASK — admin + director_of_operations only
+    // Writes assigned_to_id, fires in-app notification, queues alert_log for email.
+    // To open to more roles: add them to the POLICY block in permissions.js AND here.
+    // ------------------------------------------------------------------------
+    if (action === "assign_task") {
+      const caller = await lookupCallerProfile(userId, payload);
+      const allowedRoles = ["admin", "director_of_operations"];
+      if (!caller || !allowedRoles.includes(caller.role)) {
+        return json({ error: "Not authorized to assign tasks" }, 403);
+      }
+
+      if (!taskId) return json({ error: "taskId required" }, 400);
+      const assigneeId: string | null = body.assigneeId ?? null;
+
+      // Fetch current task for context (name, project_id, previous assignee)
+      const { data: task, error: taskErr } = await supabase
+        .from("project_tasks")
+        .select("id, task_name, project_id, assigned_to_id")
+        .eq("id", taskId)
+        .single();
+      if (taskErr || !task) return json({ error: "Task not found" }, 404);
+
+      // Update the assignment
+      const { data: updated, error: updateErr } = await supabase
+        .from("project_tasks")
+        .update({ assigned_to_id: assigneeId, updated_at: new Date().toISOString() })
+        .eq("id", taskId)
+        .select()
+        .single();
+      if (updateErr) return json({ error: updateErr.message }, 400);
+
+      // Only notify if we're assigning to someone (not clearing)
+      if (assigneeId) {
+        // Check recipient's notification settings
+        const { data: settings } = await supabase
+          .from("notification_settings")
+          .select("in_app, email, notify_new_assignment")
+          .eq("user_id", assigneeId)
+          .maybeSingle();
+
+        // Default: notify unless explicitly opted out
+        const sendInApp = settings ? (settings.in_app && settings.notify_new_assignment) : true;
+        const sendEmail = settings ? (settings.email && settings.notify_new_assignment) : true;
+
+        // Fetch project address for context
+        const { data: proj } = await supabase
+          .from("projects")
+          .select("project_address, project_number")
+          .eq("id", task.project_id)
+          .single();
+
+        const notifTitle = `New task assigned: ${task.task_name}`;
+        const notifBody = proj
+          ? `You've been assigned to "${task.task_name}" on project ${proj.project_number} — ${proj.project_address}.`
+          : `You've been assigned to "${task.task_name}".`;
+
+        // In-app notification
+        if (sendInApp) {
+          await supabase.from("notifications").insert({
+            recipient_id: assigneeId,
+            project_id: task.project_id,
+            task_id: taskId,
+            title: notifTitle,
+            body: notifBody,
+            type: "assignment",
+          });
+        }
+
+        // Queue email via alert_log (picked up by future Graph email sender)
+        if (sendEmail) {
+          const { data: recipient } = await supabase
+            .from("profiles")
+            .select("email")
+            .eq("id", assigneeId)
+            .single();
+
+          if (recipient?.email) {
+            const dedupKey = `assign_task_${taskId}_${assigneeId}_${Date.now()}`;
+            await supabase.from("alert_log").insert({
+              project_task_id: taskId,
+              project_id: task.project_id,
+              recipient_id: assigneeId,
+              recipient_email: recipient.email,
+              alert_type: "task_assigned",
+              delivery_status: "queued",
+              dedup_key: dedupKey,
+              scheduled_at: new Date().toISOString(),
+            }).maybeSingle(); // ignore conflict on dedup_key
+          }
+        }
+      }
+
+      return json({ data: updated });
+    }
+
+    // ------------------------------------------------------------------------
     // UPDATE MILESTONE
     // ------------------------------------------------------------------------
     if (action === "update_milestone") {

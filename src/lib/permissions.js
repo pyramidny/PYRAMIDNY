@@ -7,6 +7,14 @@
 //
 // To change policy: edit BOTH this file AND the POLICY block in
 // supabase/functions/project-proxy/index.ts. Keep them in sync.
+//
+// ── AUDIBLE REFERENCE ────────────────────────────────────────────────────────
+// To open a capability to more roles, add the role string to its array.
+// Valid role strings: "admin" | "director_of_operations" | "project_manager" |
+//   "assistant_pm" | "estimator" | "task_manager" | "sales_rep" |
+//   "estimating_coordinator" | "purchasing_manager" | "billing_coordinator" |
+//   "office_manager" | "field_crew"
+// Use "*" to allow all authenticated users.
 // =============================================================================
 
 export const POLICY = {
@@ -20,6 +28,10 @@ export const POLICY = {
 
   // Team / assignments
   assign_team:           ["admin"],
+
+  // Task assignment — admin + Director of Operations
+  // To also allow PMs: add "project_manager" to this array
+  assign_task:           ["admin", "director_of_operations"],
 
   // Production checklist
   edit_production:       ["admin"],
@@ -58,7 +70,7 @@ import { useAuth } from '@/context/AuthContext'
  *
  * Usage:
  *   const canDo = useCanDo()
- *   {canDo('advance_stage') && <button>Advance Stage</button>}
+ *   {canDo('assign_task') && <AssignDropdown />}
  */
 export function useCanDo() {
   const { profile } = useAuth()
@@ -68,7 +80,6 @@ export function useCanDo() {
 
 /**
  * Convenience helper — returns true if the current user is an admin.
- * Useful when you want a single short check at the top of a component.
  */
 export function useIsAdmin() {
   const { profile } = useAuth()

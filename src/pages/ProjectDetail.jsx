@@ -596,37 +596,89 @@ export default function ProjectDetail() {
         <div className="space-y-2">
           {tasks.length === 0 && <p className="text-sm text-gray-500">No tasks yet.</p>}
           {tasks.map((task) => {
-            // PMs/etc. can only check off tasks assigned to them. Admins can toggle any.
             const isOwnTask = task.assigned_to_id && profile?.id && task.assigned_to_id === profile.id
             const canToggle = canDo('edit_any_task') || isOwnTask
+            const assignee = staffPool.find(s => s.id === task.assigned_to_id)
+            const assigneeName = assignee?.display_name ?? assignee?.full_name ?? null
+
             return (
-              <label
+              <div
                 key={task.id}
-                className={`flex items-start gap-3 bg-white rounded-lg border border-gray-200 p-3.5 transition-colors ${
-                  canToggle ? 'cursor-pointer hover:bg-gray-50' : 'cursor-not-allowed opacity-70'
-                }`}
+                className="flex items-start gap-3 bg-white rounded-lg border border-gray-200 p-3.5"
               >
+                {/* Checkbox */}
                 <input
                   type="checkbox"
                   checked={task.status === 'completed'}
                   onChange={() => canToggle && toggleTask(task)}
                   disabled={!canToggle}
-                  className="mt-0.5 w-4 h-4 rounded border-gray-300 text-pyramid-500 disabled:cursor-not-allowed"
+                  className={`mt-0.5 w-4 h-4 rounded border-gray-300 text-pyramid-500 flex-shrink-0 ${
+                    canToggle ? 'cursor-pointer' : 'cursor-not-allowed opacity-50'
+                  }`}
                 />
+
+                {/* Task info */}
                 <div className="flex-1 min-w-0">
                   <p className={`text-sm ${task.status === 'completed' ? 'line-through text-gray-400' : 'text-gray-900'}`}>
                     {task.task_name}
                   </p>
-                  {task.due_date && (
-                    <p className="text-xs text-gray-400 mt-0.5">
-                      Due: {new Date(task.due_date).toLocaleDateString()}
-                    </p>
-                  )}
+
+                  <div className="flex flex-wrap items-center gap-3 mt-1">
+                    {/* Stage badge */}
+                    <span className="text-[10px] font-medium text-gray-400 uppercase tracking-wide">
+                      Stage {task.stage_number}
+                    </span>
+
+                    {/* Due date */}
+                    {task.due_date && (
+                      <span className="text-xs text-gray-400">
+                        Due: {new Date(task.due_date).toLocaleDateString()}
+                      </span>
+                    )}
+
+                    {/* Assignee display or "unassigned" */}
+                    {canDo('assign_task') ? (
+                      <select
+                        value={task.assigned_to_id ?? ''}
+                        onChange={async (e) => {
+                          const newId = e.target.value || null
+                          // Optimistic update
+                          setTasks(ts => ts.map(t =>
+                            t.id === task.id ? { ...t, assigned_to_id: newId } : t
+                          ))
+                          try {
+                            await proxy({ action: 'assign_task', taskId: task.id, assigneeId: newId })
+                          } catch (err) {
+                            // Revert on failure
+                            setTasks(ts => ts.map(t =>
+                              t.id === task.id ? { ...t, assigned_to_id: task.assigned_to_id } : t
+                            ))
+                            alert('Failed to assign task: ' + err.message)
+                          }
+                        }}
+                        className="text-xs border border-gray-200 rounded px-1.5 py-0.5 text-gray-700 bg-white focus:outline-none focus:border-pyramid-400"
+                      >
+                        <option value="">— Unassigned —</option>
+                        {staffPool.map(s => (
+                          <option key={s.id} value={s.id}>
+                            {s.display_name ?? s.full_name}
+                          </option>
+                        ))}
+                      </select>
+                    ) : assigneeName ? (
+                      <span className="text-xs text-pyramid-600 font-medium">
+                        {assigneeName}
+                      </span>
+                    ) : (
+                      <span className="text-xs text-gray-400 italic">Unassigned</span>
+                    )}
+                  </div>
+
                   {!canToggle && !canDo('edit_any_task') && (
-                    <p className="text-[10px] text-gray-400 mt-0.5 italic">Not assigned to you</p>
+                    <p className="text-[10px] text-gray-400 mt-1 italic">Not assigned to you</p>
                   )}
                 </div>
-              </label>
+              </div>
             )
           })}
         </div>
