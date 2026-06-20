@@ -52,27 +52,48 @@ function sortMilestones(list) {
 }
 
 // Document categories — match the SharePoint subfolder tree
+// (1. Estimating Phase + 2. Production). Values are the SP path used on upload.
 const DOCUMENT_CATEGORIES = [
-  { value: 'Files/Contracts',        label: 'Contracts' },
-  { value: 'Files/Change_Orders',    label: 'Change Orders' },
-  { value: 'Files/Permits',          label: 'Permits' },
-  { value: 'Files/Insurance_COI_CCI', label: 'Insurance (COI/CCI)' },
-  { value: 'Files/Submittals',       label: 'Submittals' },
-  { value: 'Files/Plans_Drawings',   label: 'Plans & Drawings' },
-  { value: 'Files/Inspections',      label: 'Inspections' },
-  { value: 'Files/Correspondence',   label: 'Correspondence' },
-  { value: 'Files/Closeout',         label: 'Closeout' },
-  { value: 'Files/Other',            label: 'Other' },
+  { value: '1. Estimating Phase/Bid Invite & Emails',              label: 'Bid Invite & Emails' },
+  { value: '1. Estimating Phase/Bid Submission & Pricing Template', label: 'Bid Submission & Pricing' },
+  { value: '1. Estimating Phase/Drawings',                         label: 'Drawings (Estimating)' },
+  { value: '1. Estimating Phase/Interview Package',                label: 'Interview Package' },
+  { value: '1. Estimating Phase/Specifications & Notice to Bidders', label: 'Specs & Notice to Bidders' },
+  { value: '1. Estimating Phase/Vendor Quotes',                    label: 'Vendor Quotes' },
+  { value: '1. Estimating Phase/Walkthrough Photos & Notes',       label: 'Walkthrough Photos & Notes' },
+  { value: '2. Production/CCI or Tax Exempt',                      label: 'CCI or Tax Exempt' },
+  { value: '2. Production/Change Orders & Proposal',               label: 'Change Orders & Proposal' },
+  { value: '2. Production/Close Outs',                             label: 'Close Outs' },
+  { value: '2. Production/Contract & Riders',                      label: 'Contract & Riders' },
+  { value: '2. Production/Drawings',                               label: 'Drawings (Production)' },
+  { value: '2. Production/Equipment & Material Orders',            label: 'Equipment & Material Orders' },
+  { value: '2. Production/Field Reports & Meeting Minutes',        label: 'Field Reports & Minutes' },
+  { value: '2. Production/Incident Reports',                       label: 'Incident Reports' },
+  { value: '2. Production/Informational Packet',                   label: 'Informational Packet' },
+  { value: '2. Production/Insurance & Indemnity',                  label: 'Insurance & Indemnity' },
+  { value: '2. Production/Job Cost',                               label: 'Job Cost' },
+  { value: '2. Production/Job Site Binder',                        label: 'Job Site Binder' },
+  { value: '2. Production/Pay Reqs',                               label: 'Pay Reqs' },
+  { value: '2. Production/Permits',                                label: 'Permits' },
+  { value: '2. Production/Subcontractors',                         label: 'Subcontractors' },
+  { value: '2. Production/Submittals',                             label: 'Submittals' },
+  { value: '2. Production/Timelines & Schedules',                  label: 'Timelines & Schedules' },
+  { value: '2. Production/Transfer Package',                       label: 'Transfer Package' },
+  { value: '2. Production/Vendor & Invoices',                      label: 'Vendor & Invoices' },
 ]
 
 const PHOTO_CATEGORIES = [
-  { value: 'Pictures/Before',         label: 'Before' },
-  { value: 'Pictures/Progress',       label: 'Progress' },
-  { value: 'Pictures/After',          label: 'After' },
-  { value: 'Pictures/Permits_Posted', label: 'Permits Posted' },
-  { value: 'Pictures/Damage',         label: 'Damage' },
-  { value: 'Pictures/Other',          label: 'Other' },
+  { value: '3. Photos/Before',         label: 'Before' },
+  { value: '3. Photos/Progress',       label: 'Progress' },
+  { value: '3. Photos/After',          label: 'After' },
+  { value: '3. Photos/Permits Posted', label: 'Permits Posted' },
+  { value: '3. Photos/Damage',         label: 'Damage' },
+  { value: '3. Photos/Other',          label: 'Other' },
 ]
+
+// Which top-level parents count as documents vs. photos.
+const isDocCategory   = (c) => !!c && (c.startsWith('1. Estimating Phase/') || c.startsWith('2. Production/'))
+const isPhotoCategory = (c) => !!c && c.startsWith('3. Photos/')
 
 function isImageMime(mime = '') {
   return mime.startsWith('image/')
@@ -92,7 +113,7 @@ export default function ProjectDetail() {
   const [error, setError] = useState(null)
   const [activeTab, setActiveTab] = useState('overview')
   const [uploading, setUploading] = useState(false)
-  const [uploadCategory, setUploadCategory] = useState('Files/Other')
+  const [uploadCategory, setUploadCategory] = useState('2. Production/Job Site Binder')
   const [photoFilter, setPhotoFilter] = useState('all')
   const [lightboxDoc, setLightboxDoc] = useState(null)
   const [staffPool, setStaffPool] = useState([])
@@ -713,21 +734,21 @@ export default function ProjectDetail() {
               </label>
 
               <span className="text-xs text-gray-400 ml-auto">
-                {documents.filter(d => d.category?.startsWith('Files/')).length} document{documents.filter(d => d.category?.startsWith('Files/')).length !== 1 ? 's' : ''}
+                {documents.filter(d => isDocCategory(d.category)).length} document{documents.filter(d => isDocCategory(d.category)).length !== 1 ? 's' : ''}
               </span>
             </div>
           ) : (
             <div className="flex items-center justify-between gap-2 mb-4 pb-4 border-b border-gray-200">
               <p className="text-xs text-gray-400">View only — uploads managed by admins.</p>
               <span className="text-xs text-gray-400">
-                {documents.filter(d => d.category?.startsWith('Files/')).length} document{documents.filter(d => d.category?.startsWith('Files/')).length !== 1 ? 's' : ''}
+                {documents.filter(d => isDocCategory(d.category)).length} document{documents.filter(d => isDocCategory(d.category)).length !== 1 ? 's' : ''}
               </span>
             </div>
           )}
 
           {/* Grouped by category */}
           {(() => {
-            const docs = documents.filter(d => d.category?.startsWith('Files/'))
+            const docs = documents.filter(d => isDocCategory(d.category))
             if (docs.length === 0) {
               return <p className="text-sm text-gray-500">No documents yet. Pick a category above and upload.</p>
             }
@@ -792,7 +813,7 @@ export default function ProjectDetail() {
           {canDo('upload_file') ? (
             <div className="flex flex-wrap items-center gap-2 mb-4 pb-4 border-b border-gray-200">
               <select
-                value={uploadCategory.startsWith('Pictures/') ? uploadCategory : 'Pictures/Progress'}
+                value={isPhotoCategory(uploadCategory) ? uploadCategory : '3. Photos/Progress'}
                 onChange={(e) => setUploadCategory(e.target.value)}
                 disabled={uploading}
                 className="text-sm border border-gray-200 rounded px-2 py-1.5 text-gray-900 bg-white"
@@ -808,7 +829,7 @@ export default function ProjectDetail() {
                   accept="image/*"
                   capture="environment"
                   className="hidden"
-                  onChange={(e) => uploadFile(e, uploadCategory.startsWith('Pictures/') ? uploadCategory : 'Pictures/Progress')}
+                  onChange={(e) => uploadFile(e, isPhotoCategory(uploadCategory) ? uploadCategory : '3. Photos/Progress')}
                   disabled={uploading}
                 />
                 <span className="inline-block text-xs bg-pyramid-500 text-white px-3 py-1.5 rounded-lg hover:bg-pyramid-600 transition-colors">
@@ -817,14 +838,14 @@ export default function ProjectDetail() {
               </label>
 
               <span className="text-xs text-gray-400 ml-auto">
-                {documents.filter(d => d.category?.startsWith('Pictures/')).length} photo{documents.filter(d => d.category?.startsWith('Pictures/')).length !== 1 ? 's' : ''}
+                {documents.filter(d => isPhotoCategory(d.category)).length} photo{documents.filter(d => isPhotoCategory(d.category)).length !== 1 ? 's' : ''}
               </span>
             </div>
           ) : (
             <div className="flex items-center justify-between gap-2 mb-4 pb-4 border-b border-gray-200">
               <p className="text-xs text-gray-400">View only — photo uploads managed by admins.</p>
               <span className="text-xs text-gray-400">
-                {documents.filter(d => d.category?.startsWith('Pictures/')).length} photo{documents.filter(d => d.category?.startsWith('Pictures/')).length !== 1 ? 's' : ''}
+                {documents.filter(d => isPhotoCategory(d.category)).length} photo{documents.filter(d => isPhotoCategory(d.category)).length !== 1 ? 's' : ''}
               </span>
             </div>
           )}
@@ -859,7 +880,7 @@ export default function ProjectDetail() {
           {/* Thumbnail grid */}
           {(() => {
             const photos = documents.filter(d =>
-              d.category?.startsWith('Pictures/') &&
+              isPhotoCategory(d.category) &&
               (photoFilter === 'all' || d.category === photoFilter),
             )
             if (photos.length === 0) {

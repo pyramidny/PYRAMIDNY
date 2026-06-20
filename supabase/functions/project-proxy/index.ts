@@ -16,14 +16,48 @@ const cors = {
 // ============================================================================
 // SharePoint subfolder structure per project
 // ============================================================================
+// Three top-level parents per project (confirmed by Jorge, Jun 2026).
+// "3. Photos" is intentionally flat — no child folders.
 const SP_SUBFOLDER_TREE: Record<string, string[]> = {
-  Files: [
-    "Contracts", "Change_Orders", "Permits", "Insurance_COI_CCI",
-    "Submittals", "Plans_Drawings", "Inspections", "Correspondence",
-    "Closeout", "Other",
+  "1. Estimating Phase": [
+    "Bid Invite & Emails",
+    "Bid Submission & Pricing Template",
+    "Drawings",
+    "Interview Package",
+    "Specifications & Notice to Bidders",
+    "Vendor Quotes",
+    "Walkthrough Photos & Notes",
   ],
-  Pictures: [
-    "Before", "Progress", "After", "Permits_Posted", "Damage", "Other",
+  "2. Production": [
+    "CCI or Tax Exempt",
+    "Change Orders & Proposal",
+    "Close Outs",
+    "Contract & Riders",
+    "Drawings",
+    "Equipment & Material Orders",
+    "Field Reports & Meeting Minutes",
+    "Incident Reports",
+    "Informational Packet",
+    "Insurance & Indemnity",
+    "Job Cost",
+    "Job Site Binder",
+    "Pay Reqs",
+    "Permits",
+    "Subcontractors",
+    "Submittals",
+    "Timelines & Schedules",
+    "Transfer Package",
+    "Vendor & Invoices",
+  ],
+  // Kept as subfolders so the app's Photos tab keeps Before/After separation.
+  // If Jorge wants a flat Photos folder, set this back to [].
+  "3. Photos": [
+    "Before",
+    "Progress",
+    "After",
+    "Permits Posted",
+    "Damage",
+    "Other",
   ],
 };
 
@@ -569,7 +603,7 @@ serve(async (req) => {
 
       const { data: doc } = await supabase.from("project_documents").insert({
         project_id: targetId,
-        category: category ?? "Files/Other",
+        category: category ?? "2. Production/Job Site Binder",
         document_type: document_type ?? null,
         name: fileName,
         sharepoint_item_id: driveItem.id,
