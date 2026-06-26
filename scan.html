@@ -4,707 +4,555 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, viewport-fit=cover" />
 <title>Pyramid — Tool Control</title>
-
-<script src="https://cdn.tailwindcss.com"></script>
-<script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
-<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
-<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-<script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
-
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Barlow+Semi+Condensed:wght@500;600;700&family=Inter:wght@400;500;600&family=Roboto+Mono:wght@500;600;700&display=swap" rel="stylesheet" />
-
-<script>
-  tailwind.config = {
-    theme: {
-      extend: {
-        colors: {
-          ink: '#15191E',
-          slate2: '#222831',
-          kgreen: '#1B5E20',
-          kgreenSoft: '#E6EFE7',
-          korange: '#E65100',
-          korangeSoft: '#FCEAE0',
-          amber2: '#B45309',
-          amberSoft: '#FBF0DD',
-          red2: '#B91C1C',
-          redSoft: '#FBE4E4',
-          paper: '#F4F5F2',
-          steel: '#5B6470',
-        },
-        fontFamily: {
-          display: ['"Barlow Semi Condensed"', 'sans-serif'],
-          body: ['Inter', 'system-ui', 'sans-serif'],
-          mono: ['"Roboto Mono"', 'monospace'],
-        },
-      },
-    },
-  };
-</script>
-
 <style>
-  html, body { background: #F4F5F2; }
-  body { font-family: 'Inter', system-ui, sans-serif; -webkit-font-smoothing: antialiased; }
-  .display { font-family: 'Barlow Semi Condensed', sans-serif; letter-spacing: .01em; }
-  .mono { font-family: 'Roboto Mono', monospace; }
-
-  /* Scanner reticle — the signature element */
-  .reticle::before, .reticle::after,
-  .reticle > .c1, .reticle > .c2 {
-    content: ""; position: absolute; width: 34px; height: 34px;
-    border: 3px solid #E65100; border-radius: 4px;
+  :root{
+    --ink:#15191E; --slate:#222831; --green:#1B5E20; --greenSoft:#E6EFE7;
+    --orange:#E65100; --orangeSoft:#FCEAE0; --amber:#B45309; --amberSoft:#FBF0DD;
+    --red:#B91C1C; --redSoft:#FBE4E4; --paper:#F4F5F2; --steel:#5B6470; --line:rgba(0,0,0,.07);
   }
-  .reticle::before { top: 14px; left: 14px; border-right: 0; border-bottom: 0; }
-  .reticle::after { top: 14px; right: 14px; border-left: 0; border-bottom: 0; }
-  .reticle > .c1 { bottom: 14px; left: 14px; border-right: 0; border-top: 0; }
-  .reticle > .c2 { bottom: 14px; right: 14px; border-left: 0; border-top: 0; }
-  .scanline { position:absolute; left:18px; right:18px; height:2px; background:linear-gradient(90deg,transparent,#E65100,transparent);
-    animation: sweep 2.2s ease-in-out infinite; }
-  @keyframes sweep { 0%{top:20px} 50%{top:calc(100% - 22px)} 100%{top:20px} }
-  @media (prefers-reduced-motion: reduce){ .scanline{ animation:none; top:50% } }
+  *{box-sizing:border-box}
+  html,body{margin:0;background:var(--paper);color:var(--ink);
+    font-family:'Inter',system-ui,-apple-system,sans-serif;-webkit-font-smoothing:antialiased}
+  .disp{font-family:'Barlow Semi Condensed',sans-serif;letter-spacing:.01em}
+  .mono{font-family:'Roboto Mono',monospace}
+  button{font-family:inherit;cursor:pointer;border:0;background:none}
+  input,select{font-family:inherit;font-size:15px}
+  .app{max-width:480px;margin:0 auto;min-height:100vh;position:relative;padding-bottom:78px}
 
-  #reader video { border-radius: 12px; object-fit: cover; }
-  #reader img[alt="Info icon"], #reader__dashboard_section_csr span { display:none !important; }
+  /* header */
+  .hdr{background:var(--ink);color:#fff;padding:18px 18px 14px;position:sticky;top:0;z-index:20}
+  .hdr-top{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px}
+  .wordmark{font-family:'Barlow Semi Condensed';font-weight:700;font-size:26px;line-height:1;letter-spacing:.04em}
+  .sub{color:var(--orange);font-size:12px;font-weight:600;letter-spacing:.2em;text-transform:uppercase;margin-top:2px}
+  .demo{font-size:10px;font-weight:700;letter-spacing:.18em;color:rgba(255,255,255,.45);border:1px solid rgba(255,255,255,.25);border-radius:6px;padding:4px 8px}
+  .stats{display:flex;gap:8px}
+  .stat{flex:1;background:rgba(255,255,255,.06);border-radius:10px;padding:8px 4px;text-align:center}
+  .stat b{font-family:'Barlow Semi Condensed';font-weight:700;font-size:24px;line-height:1;display:block}
+  .stat span{font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:rgba(255,255,255,.55);margin-top:3px;display:block}
+  .t-out{color:var(--orange)} .t-av{color:#7FC684} .t-mt{color:#E9B872} .t-od{color:#F08A8A}
 
-  .tap { transition: transform .06s ease; }
-  .tap:active { transform: scale(.97); }
+  .banner{background:var(--slate);color:rgba(255,255,255,.8);font-size:12px;padding:10px 18px;display:flex;gap:10px;align-items:flex-start}
+  .banner button{color:rgba(255,255,255,.5);font-size:18px;line-height:1}
 
-  /* Print: show only the tag */
-  @media print {
-    body * { visibility: hidden !important; }
-    #print-tag, #print-tag * { visibility: visible !important; }
-    #print-tag { position: fixed; inset: 0; margin: auto; }
-    @page { size: 2.2in 1.1in; margin: 0; }
+  .view{padding:18px}
+  h1.title{font-family:'Barlow Semi Condensed';font-weight:700;font-size:24px;margin:0 0 4px}
+  .muted{color:var(--steel);font-size:14px;margin:0 0 16px}
+
+  .card{background:#fff;border:1px solid var(--line);border-radius:14px;padding:16px;margin-bottom:14px}
+  .lbl{font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--steel);font-weight:600;margin-bottom:6px}
+
+  .btn{display:flex;align-items:center;justify-content:center;gap:8px;width:100%;border-radius:12px;padding:14px;font-weight:600;font-size:15px}
+  .btn-o{background:var(--orange);color:#fff} .btn-g{background:var(--green);color:#fff}
+  .btn-d{background:var(--ink);color:#fff} .btn-ghost{background:var(--paper);color:var(--steel)}
+  .btn-warn{background:#fff;color:var(--amber);border:1px solid rgba(180,83,9,.3);padding:12px;font-size:14px}
+  .btn:active{transform:scale(.98)} .btn[disabled]{opacity:.45}
+
+  .pill{display:inline-flex;align-items:center;gap:6px}
+  .tag{padding:3px 9px;border-radius:999px;font-size:11px;font-weight:600}
+  .s-available{background:var(--greenSoft);color:var(--green)}
+  .s-out{background:var(--orangeSoft);color:var(--orange)}
+  .s-maintenance{background:var(--amberSoft);color:var(--amber)}
+  .s-over{background:var(--redSoft);color:var(--red)}
+
+  /* scanner */
+  .viewfinder{position:relative;background:var(--ink);border-radius:18px;overflow:hidden;aspect-ratio:1/1;margin-bottom:12px}
+  #reader{width:100%;height:100%}
+  #reader video{object-fit:cover;border-radius:18px}
+  .vf-overlay{position:absolute;inset:0;display:grid;place-items:center;text-align:center;color:rgba(255,255,255,.8);font-size:14px}
+  .reticle{position:absolute;inset:0;pointer-events:none}
+  .reticle i{position:absolute;width:34px;height:34px;border:3px solid var(--orange);border-radius:4px}
+  .reticle i:nth-child(1){top:16px;left:16px;border-right:0;border-bottom:0}
+  .reticle i:nth-child(2){top:16px;right:16px;border-left:0;border-bottom:0}
+  .reticle i:nth-child(3){bottom:16px;left:16px;border-right:0;border-top:0}
+  .reticle i:nth-child(4){bottom:16px;right:16px;border-left:0;border-top:0}
+  .scanline{position:absolute;left:20px;right:20px;height:2px;background:linear-gradient(90deg,transparent,var(--orange),transparent);animation:sweep 2.2s ease-in-out infinite}
+  @keyframes sweep{0%{top:22px}50%{top:calc(100% - 24px)}100%{top:22px}}
+  @media (prefers-reduced-motion:reduce){.scanline{animation:none;top:50%}}
+
+  .input{width:100%;background:var(--paper);border:1px solid var(--line);border-radius:10px;padding:11px 12px;color:var(--ink)}
+  .chips{display:flex;flex-wrap:wrap;gap:8px}
+  .chip{background:#fff;border:1px solid var(--line);border-radius:10px;padding:8px 12px;font-size:12px}
+  .chip .dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-left:8px;vertical-align:middle}
+  .filterchip{flex:0 0 auto;padding:7px 14px;border-radius:999px;font-size:13px;font-weight:600;border:1px solid var(--line);background:#fff;color:var(--steel)}
+  .filterchip.on{background:var(--ink);color:#fff;border-color:var(--ink)}
+
+  /* tool rows */
+  .row{display:flex;align-items:center;gap:12px;width:100%;background:#fff;border:1px solid var(--line);border-radius:14px;padding:13px;text-align:left;margin-bottom:10px}
+  .row:active{transform:scale(.99)}
+  .swatch{width:44px;height:44px;border-radius:10px;background:var(--paper);display:grid;place-items:center;flex:0 0 auto}
+  .swatch .dot{width:11px;height:11px;border-radius:50%}
+  .row .name{font-family:'Barlow Semi Condensed';font-weight:600;font-size:17px;line-height:1.1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .row .meta{font-size:12.5px;color:var(--steel);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .grow{flex:1;min-width:0}
+  .av{border-radius:50%;background:var(--ink);color:#fff;display:grid;place-items:center;font-weight:600;flex:0 0 auto}
+
+  /* activity */
+  .ev{display:flex;gap:12px;background:#fff;border:1px solid var(--line);border-radius:14px;padding:13px;margin-bottom:10px}
+  .ev .ttl{font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.04em}
+
+  /* sheet + modal */
+  .scrim{position:fixed;inset:0;background:rgba(21,25,30,.6);z-index:40;display:flex;align-items:flex-end;justify-content:center}
+  .scrim.center{align-items:center;padding:20px}
+  .sheet{background:var(--paper);width:100%;max-width:480px;border-radius:18px 18px 0 0;max-height:92vh;overflow-y:auto}
+  .scrim.center .sheet{border-radius:18px;max-width:380px}
+  .sheet-hd{position:sticky;top:0;background:var(--ink);color:#fff;padding:16px 18px;display:flex;justify-content:space-between;align-items:flex-start}
+  .sheet-bd{padding:18px;display:flex;flex-direction:column;gap:16px}
+  .specgrid{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+  .fld .v{font-size:15px}
+  .condrow{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px}
+  .condbtn{padding:9px;border-radius:10px;font-size:12.5px;font-weight:600;background:var(--paper);color:var(--steel);border:1px solid transparent}
+  .condbtn.on{background:var(--ink);color:#fff;border-color:var(--ink)}
+  .x{font-size:24px;line-height:1;color:rgba(255,255,255,.7)}
+
+  /* physical tag */
+  .tagcard{display:flex;gap:12px;align-items:center;padding:12px;border-radius:10px;width:300px;
+    background:linear-gradient(135deg,#E8EAEC,#C9CDD2);border:1px solid #AEB4BB}
+  .tagcard .qr{background:#fff;padding:6px;border-radius:6px;flex:0 0 auto}
+  .tagcard .qr img,.tagcard .qr canvas{display:block}
+
+  /* nav */
+  .nav{position:fixed;bottom:0;left:50%;transform:translateX(-50%);width:100%;max-width:480px;background:#fff;border-top:1px solid rgba(0,0,0,.1);display:grid;grid-template-columns:repeat(4,1fr);z-index:20;padding-bottom:env(safe-area-inset-bottom)}
+  .navbtn{padding:10px 0;display:flex;flex-direction:column;align-items:center;gap:4px;color:var(--steel);font-size:11px;font-weight:600}
+  .navbtn.on{color:var(--ink)} .navbtn.on svg{color:var(--orange)}
+  .navbtn svg{width:24px;height:24px}
+
+  .toast{position:fixed;bottom:96px;left:50%;transform:translateX(-50%);background:var(--ink);color:#fff;font-size:14px;padding:10px 16px;border-radius:12px;z-index:60;box-shadow:0 8px 24px rgba(0,0,0,.25);white-space:nowrap}
+  .hidden{display:none!important}
+  .empty{text-align:center;color:var(--steel);padding:60px 0}
+
+  @media print{
+    body *{visibility:hidden!important}
+    #print-tag,#print-tag *{visibility:visible!important}
+    #print-tag{position:fixed;inset:0;margin:auto}
+    @page{size:2.2in 1.1in;margin:0}
   }
 </style>
 </head>
 <body>
-<div id="root"></div>
+<div class="app">
+  <div id="header"></div>
+  <div id="banner"></div>
+  <div id="view"></div>
+  <div id="nav"></div>
+</div>
+<div id="sheet"></div>
+<div id="modal"></div>
+<div id="toast" class="toast hidden"></div>
 <div id="qr-stage" style="position:absolute;left:-9999px;top:-9999px"></div>
 
-<script type="text/babel">
-const { useState, useEffect, useRef, useMemo } = React;
+<!-- Lazy, optional libraries. The app renders fully without them. -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+<script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
 
-/* ---------------------------------------------------------------- storage */
-const safeStore = {
-  get(k){ try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : null; } catch(e){ return null; } },
-  set(k,v){ try { localStorage.setItem(k, JSON.stringify(v)); } catch(e){} },
-};
+<script>
+(function(){
+  "use strict";
 
-/* ---------------------------------------------------------------- seed data */
-const TECHS = [
-  { id:'t1', name:'Marcus Rivera', initials:'MR' },
-  { id:'t2', name:'Danny Cho', initials:'DC' },
-  { id:'t3', name:'Sofia Almeida', initials:'SA' },
-  { id:'t4', name:'Will Pruitt', initials:'WP' },
-  { id:'t5', name:'Tool Crib (return)', initials:'TC' },
-];
-const SITES = ['Yonkers — 3rd Ave','New Rochelle — Main St','White Plains — Court St','Stamford — Harbor Point','Tool Crib'];
+  /* ---------- data ---------- */
+  var DAY = 86400000, now = Date.now();
+  var TECHS = [
+    {id:'t1',name:'Marcus Rivera',initials:'MR'},
+    {id:'t2',name:'Danny Cho',initials:'DC'},
+    {id:'t3',name:'Sofia Almeida',initials:'SA'},
+    {id:'t4',name:'Will Pruitt',initials:'WP'},
+    {id:'t5',name:'Tool Crib (return)',initials:'TC'}
+  ];
+  var SITES = ['Yonkers — 3rd Ave','New Rochelle — Main St','White Plains — Court St','Stamford — Harbor Point','Tool Crib'];
 
-const DAY = 86400000;
-const now = Date.now();
-function mk(o){ return Object.assign({ category:'Power tool', notes:'', photo:null, condition:'Good' }, o); }
+  function mk(o){
+    var d={category:'Power tool',notes:'',photo:null,condition:'Good'};
+    for(var k in o) d[k]=o[k]; return d;
+  }
+  var SEED_TOOLS = [
+    mk({assetId:'PYR-0001',name:'Hammer Drill',manufacturer:'Milwaukee',model:'2904-20 M18 FUEL',serial:'MWK2904-44871',value:329,status:'out',holder:'t1',jobSite:'Yonkers — 3rd Ave',lastActionAt:now-5.2*DAY}),
+    mk({assetId:'PYR-0002',name:'Rotary Hammer',manufacturer:'Bosch',model:'RH328VC',serial:'BSH328-99120',value:449,status:'out',holder:'t2',jobSite:'New Rochelle — Main St',lastActionAt:now-0.4*DAY}),
+    mk({assetId:'PYR-0003',name:'Reciprocating Saw',manufacturer:'DeWalt',model:'DCS389 FLEXVOLT',serial:'DWT389-21044',value:299,status:'available',holder:null,jobSite:'Tool Crib',lastActionAt:now-2.1*DAY}),
+    mk({assetId:'PYR-0004',name:'Angle Grinder',manufacturer:'Makita',model:'GA5070',serial:'MKT5070-58823',value:159,status:'available',holder:null,jobSite:'Tool Crib',lastActionAt:now-9*DAY}),
+    mk({assetId:'PYR-0005',name:'Demolition Hammer',manufacturer:'Hilti',model:'TE 1000-AVR',serial:'HLT1000-30277',value:1899,status:'maintenance',holder:null,jobSite:'Tool Crib',lastActionAt:now-1.3*DAY,notes:'Carbon brushes worn — sent to service center.',condition:'Needs attention'}),
+    mk({assetId:'PYR-0006',name:'Impact Driver',manufacturer:'Milwaukee',model:'2853-20 M18',serial:'MWK2853-71190',value:179,status:'available',holder:null,jobSite:'Tool Crib',lastActionAt:now-4*DAY}),
+    mk({assetId:'PYR-0007',name:'Wet/Dry Vacuum',manufacturer:'Ridgid',model:'WD1450',serial:'RDG1450-66002',value:139,status:'out',holder:'t3',jobSite:'Stamford — Harbor Point',lastActionAt:now-1.9*DAY}),
+    mk({assetId:'PYR-0008',name:'Generator 3500W',manufacturer:'Honda',model:'EU3000iS',serial:'HND3000-40551',value:2199,status:'available',holder:null,jobSite:'Tool Crib',lastActionAt:now-12*DAY,category:'Equipment'}),
+    mk({assetId:'PYR-0009',name:'Rotary Laser Level',manufacturer:'Bosch',model:'GRL4000',serial:'BSH4000-18834',value:629,status:'available',holder:null,jobSite:'Tool Crib',lastActionAt:now-6*DAY,category:'Instrument'}),
+    mk({assetId:'PYR-0010',name:'Circular Saw',manufacturer:'DeWalt',model:'DCS570 ATOMIC',serial:'DWT570-90123',value:189,status:'out',holder:'t4',jobSite:'White Plains — Court St',lastActionAt:now-6.7*DAY})
+  ];
+  var SEED_ACT = [
+    {id:'a1',ts:now-5.2*DAY,assetId:'PYR-0001',toolName:'Hammer Drill',action:'out',techId:'t1',jobSite:'Yonkers — 3rd Ave',condition:null,note:''},
+    {id:'a2',ts:now-6.7*DAY,assetId:'PYR-0010',toolName:'Circular Saw',action:'out',techId:'t4',jobSite:'White Plains — Court St',condition:null,note:''},
+    {id:'a3',ts:now-2.1*DAY,assetId:'PYR-0003',toolName:'Reciprocating Saw',action:'in',techId:'t5',jobSite:'Tool Crib',condition:'Good',note:'Blade replaced.'},
+    {id:'a4',ts:now-1.9*DAY,assetId:'PYR-0007',toolName:'Wet/Dry Vacuum',action:'out',techId:'t3',jobSite:'Stamford — Harbor Point',condition:null,note:''},
+    {id:'a5',ts:now-1.3*DAY,assetId:'PYR-0005',toolName:'Demolition Hammer',action:'maintenance',techId:'t5',jobSite:'Tool Crib',condition:'Needs attention',note:'Carbon brushes worn.'},
+    {id:'a6',ts:now-0.4*DAY,assetId:'PYR-0002',toolName:'Rotary Hammer',action:'out',techId:'t2',jobSite:'New Rochelle — Main St',condition:null,note:''}
+  ];
+  var OVERDUE_DAYS = 3;
 
-const SEED_TOOLS = [
-  mk({ assetId:'PYR-0001', name:'Hammer Drill', manufacturer:'Milwaukee', model:'2904-20 M18 FUEL', serial:'MWK2904-44871', value:329, status:'out', holder:'t1', jobSite:'Yonkers — 3rd Ave', lastActionAt: now - 5.2*DAY }),
-  mk({ assetId:'PYR-0002', name:'Rotary Hammer', manufacturer:'Bosch', model:'RH328VC', serial:'BSH328-99120', value:449, status:'out', holder:'t2', jobSite:'New Rochelle — Main St', lastActionAt: now - 0.4*DAY }),
-  mk({ assetId:'PYR-0003', name:'Reciprocating Saw', manufacturer:'DeWalt', model:'DCS389 FLEXVOLT', serial:'DWT389-21044', value:299, status:'available', holder:null, jobSite:'Tool Crib', lastActionAt: now - 2.1*DAY }),
-  mk({ assetId:'PYR-0004', name:'Angle Grinder', manufacturer:'Makita', model:'GA5070', serial:'MKT5070-58823', value:159, status:'available', holder:null, jobSite:'Tool Crib', lastActionAt: now - 9*DAY }),
-  mk({ assetId:'PYR-0005', name:'Demolition Hammer', manufacturer:'Hilti', model:'TE 1000-AVR', serial:'HLT1000-30277', value:1899, status:'maintenance', holder:null, jobSite:'Tool Crib', lastActionAt: now - 1.3*DAY, notes:'Carbon brushes worn — sent to service center.', condition:'Needs attention' }),
-  mk({ assetId:'PYR-0006', name:'Impact Driver', manufacturer:'Milwaukee', model:'2853-20 M18', serial:'MWK2853-71190', value:179, status:'available', holder:null, jobSite:'Tool Crib', lastActionAt: now - 4*DAY }),
-  mk({ assetId:'PYR-0007', name:'Wet/Dry Vacuum', manufacturer:'Ridgid', model:'WD1450', serial:'RDG1450-66002', value:139, status:'out', holder:'t3', jobSite:'Stamford — Harbor Point', lastActionAt: now - 1.9*DAY }),
-  mk({ assetId:'PYR-0008', name:'Generator 3500W', manufacturer:'Honda', model:'EU3000iS', serial:'HND3000-40551', value:2199, status:'available', holder:null, jobSite:'Tool Crib', lastActionAt: now - 12*DAY, category:'Equipment' }),
-  mk({ assetId:'PYR-0009', name:'Rotary Laser Level', manufacturer:'Bosch', model:'GRL4000', serial:'BSH4000-18834', value:629, status:'available', holder:null, jobSite:'Tool Crib', lastActionAt: now - 6*DAY, category:'Instrument' }),
-  mk({ assetId:'PYR-0010', name:'Circular Saw', manufacturer:'DeWalt', model:'DCS570 ATOMIC', serial:'DWT570-90123', value:189, status:'out', holder:'t4', jobSite:'White Plains — Court St', lastActionAt: now - 6.7*DAY }),
-];
+  /* ---------- storage (guarded) ---------- */
+  function load(k,f){ try{ var v=localStorage.getItem(k); return v?JSON.parse(v):f; }catch(e){ return f; } }
+  function save(k,v){ try{ localStorage.setItem(k,JSON.stringify(v)); }catch(e){} }
 
-const techName = id => (TECHS.find(t=>t.id===id)||{}).name || '—';
-const techInit = id => (TECHS.find(t=>t.id===id)||{}).initials || '—';
+  /* ---------- state ---------- */
+  var S = {
+    tab:'scan',
+    tools: load('pyr_tools', SEED_TOOLS),
+    activity: load('pyr_activity', SEED_ACT),
+    openId:null, sheetMode:null, tagId:null, banner:true,
+    scanState:'idle',
+    ci:{cond:'Good',photo:null}
+  };
+  var scanner=null;
 
-const SEED_ACTIVITY = [
-  { id:'a1', ts: now-5.2*DAY, assetId:'PYR-0001', toolName:'Hammer Drill', action:'out', techId:'t1', jobSite:'Yonkers — 3rd Ave', condition:null, note:'' },
-  { id:'a2', ts: now-6.7*DAY, assetId:'PYR-0010', toolName:'Circular Saw', action:'out', techId:'t4', jobSite:'White Plains — Court St', condition:null, note:'' },
-  { id:'a3', ts: now-2.1*DAY, assetId:'PYR-0003', toolName:'Reciprocating Saw', action:'in', techId:'t5', jobSite:'Tool Crib', condition:'Good', note:'Blade replaced.' },
-  { id:'a4', ts: now-1.9*DAY, assetId:'PYR-0007', toolName:'Wet/Dry Vacuum', action:'out', techId:'t3', jobSite:'Stamford — Harbor Point', condition:null, note:'' },
-  { id:'a5', ts: now-1.3*DAY, assetId:'PYR-0005', toolName:'Demolition Hammer', action:'maintenance', techId:'t5', jobSite:'Tool Crib', condition:'Needs attention', note:'Carbon brushes worn.' },
-  { id:'a6', ts: now-0.4*DAY, assetId:'PYR-0002', toolName:'Rotary Hammer', action:'out', techId:'t2', jobSite:'New Rochelle — Main St', condition:null, note:'' },
-];
+  /* ---------- helpers ---------- */
+  function esc(s){ return String(s==null?'':s).replace(/[&<>"']/g,function(c){
+    return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]; }); }
+  function tName(id){ for(var i=0;i<TECHS.length;i++) if(TECHS[i].id===id) return TECHS[i].name; return '—'; }
+  function tInit(id){ for(var i=0;i<TECHS.length;i++) if(TECHS[i].id===id) return TECHS[i].initials; return '—'; }
+  function tool(id){ for(var i=0;i<S.tools.length;i++) if(S.tools[i].assetId===id) return S.tools[i]; return null; }
+  function overdue(t){ return t.status==='out' && (Date.now()-t.lastActionAt) > OVERDUE_DAYS*DAY; }
+  function money(n){ return '$'+Number(n||0).toLocaleString(); }
+  function ago(ts){ var s=(Date.now()-ts)/1000;
+    if(s<60) return 'just now'; if(s<3600) return Math.floor(s/60)+'m ago';
+    if(s<86400) return Math.floor(s/3600)+'h ago';
+    var d=Math.floor(s/86400); return d+(d===1?' day ago':' days ago'); }
+  var STLABEL={available:'Available',out:'Checked out',maintenance:'Maintenance'};
+  function dotColor(st){ return st==='available'?'var(--green)':st==='out'?'var(--orange)':'var(--amber)'; }
+  function pill(t){
+    var h='<span class="pill"><span class="tag s-'+t.status+'">'+STLABEL[t.status]+'</span>';
+    if(overdue(t)) h+='<span class="tag s-over">Overdue</span>';
+    return h+'</span>';
+  }
 
-const OVERDUE_DAYS = 3;
-const isOverdue = t => t.status==='out' && (now - t.lastActionAt) > OVERDUE_DAYS*DAY;
-
-/* ---------------------------------------------------------------- helpers */
-function ago(ts){
-  const s=(Date.now()-ts)/1000;
-  if(s<60) return 'just now';
-  if(s<3600) return Math.floor(s/60)+'m ago';
-  if(s<86400) return Math.floor(s/3600)+'h ago';
-  const d=Math.floor(s/86400); return d+(d===1?' day ago':' days ago');
-}
-function money(n){ return '$'+n.toLocaleString(); }
-
-const STATUS = {
-  available:{ label:'Available', cls:'bg-kgreenSoft text-kgreen' },
-  out:{ label:'Checked out', cls:'bg-korangeSoft text-korange' },
-  maintenance:{ label:'Maintenance', cls:'bg-amberSoft text-amber2' },
-};
-
-/* ---------------------------------------------------------------- icons */
-const I = {
-  scan:(p)=> <svg {...p} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 7V5a2 2 0 012-2h2M17 3h2a2 2 0 012 2v2M21 17v2a2 2 0 01-2 2h-2M7 21H5a2 2 0 01-2-2v-2"/><path d="M3 12h18"/></svg>,
-  grid:(p)=> <svg {...p} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>,
-  log:(p)=> <svg {...p} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M8 6h11M8 12h11M8 18h11"/><circle cx="3.5" cy="6" r="1.2" fill="currentColor" stroke="none"/><circle cx="3.5" cy="12" r="1.2" fill="currentColor" stroke="none"/><circle cx="3.5" cy="18" r="1.2" fill="currentColor" stroke="none"/></svg>,
-  plus:(p)=> <svg {...p} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 5v14M5 12h14"/></svg>,
-  back:(p)=> <svg {...p} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M15 18l-6-6 6-6"/></svg>,
-  x:(p)=> <svg {...p} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M6 6l12 12M18 6L6 18"/></svg>,
-  cam:(p)=> <svg {...p} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 8a2 2 0 012-2h2l1.5-2h7L18 6h1a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V8z"/><circle cx="12" cy="12.5" r="3.2"/></svg>,
-  print:(p)=> <svg {...p} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M6 9V3h12v6"/><rect x="4" y="9" width="16" height="8" rx="2"/><path d="M8 17h8v4H8z"/></svg>,
-  wrench:(p)=> <svg {...p} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M14.5 6.5a3.5 3.5 0 01-4.6 4.6l-5 5a1.7 1.7 0 102.4 2.4l5-5a3.5 3.5 0 004.6-4.6l-2 2-2.4-2.4 2-2z"/></svg>,
-};
-
-/* ---------------------------------------------------------------- atoms */
-function Pill({tool}){
-  const s = STATUS[tool.status];
-  return (
-    <span className="inline-flex items-center gap-1.5">
-      <span className={"px-2 py-0.5 rounded-full text-[11px] font-semibold "+s.cls}>{s.label}</span>
-      {isOverdue(tool) && <span className="px-2 py-0.5 rounded-full text-[11px] font-semibold bg-redSoft text-red2">Overdue</span>}
-    </span>
-  );
-}
-function Stat({label, value, tone}){
-  const tones={ out:'text-korange', avail:'text-kgreen', maint:'text-amber2', over:'text-red2' };
-  return (
-    <div className="flex-1 bg-slate2/60 rounded-lg px-2.5 py-2 text-center">
-      <div className={"display text-2xl font-bold leading-none "+(tones[tone]||'text-white')}>{value}</div>
-      <div className="text-[10px] uppercase tracking-wider text-white/55 mt-1">{label}</div>
-    </div>
-  );
-}
-function Field({label, children}){
-  return (
-    <div>
-      <div className="text-[11px] uppercase tracking-wider text-steel font-semibold mb-1">{label}</div>
-      <div className="text-[15px] text-ink">{children}</div>
-    </div>
-  );
-}
-function Avatar({id, size=32}){
-  return <div className="rounded-full bg-ink text-white grid place-items-center font-semibold shrink-0"
-    style={{width:size,height:size,fontSize:size*0.36}}>{techInit(id)}</div>;
-}
-
-/* ---------------------------------------------------------------- Tag (print) */
-function TagModal({tool, onClose}){
-  const qref = useRef(null);
-  useEffect(()=>{
-    if(!qref.current || !window.QRCode) return;
-    qref.current.innerHTML='';
-    new window.QRCode(qref.current, {
-      text: tool.assetId, width:150, height:150,
-      colorDark:'#15191E', colorLight:'#ffffff',
-      correctLevel: window.QRCode.CorrectLevel.H,
+  /* ---------- header ---------- */
+  function counts(){
+    var c={out:0,av:0,mt:0,od:0};
+    S.tools.forEach(function(t){
+      if(t.status==='out') c.out++; if(t.status==='available') c.av++;
+      if(t.status==='maintenance') c.mt++; if(overdue(t)) c.od++;
     });
-  },[tool]);
-  return (
-    <div className="fixed inset-0 z-50 bg-ink/70 grid place-items-center p-5" onClick={onClose}>
-      <div className="bg-white rounded-2xl w-full max-w-sm overflow-hidden" onClick={e=>e.stopPropagation()}>
-        <div className="px-5 py-4 flex items-center justify-between border-b border-black/5">
-          <h3 className="display text-xl font-bold">Asset tag</h3>
-          <button className="text-steel tap" onClick={onClose}><I.x className="w-6 h-6"/></button>
-        </div>
-        <div className="p-6 grid place-items-center">
-          {/* the physical-looking tag */}
-          <div id="print-tag" className="rounded-lg p-3 flex items-center gap-3"
-               style={{background:'linear-gradient(135deg,#E8EAEC,#C9CDD2)', border:'1px solid #AEB4BB', width:300}}>
-            <div className="bg-white p-1.5 rounded" ref={qref}></div>
-            <div className="min-w-0">
-              <div className="mono text-[10px] text-slate2/70 font-bold tracking-wide">PYRAMID · PROPERTY OF</div>
-              <div className="mono text-2xl font-bold text-ink leading-tight">{tool.assetId}</div>
-              <div className="display text-[15px] font-semibold text-slate2 truncate">{tool.name}</div>
-              <div className="text-[10px] text-slate2/70 truncate">{tool.manufacturer} {tool.model}</div>
-            </div>
-          </div>
-          <p className="text-[12px] text-steel mt-4 text-center">
-            QR error correction <span className="mono font-bold text-ink">H · 30%</span> — still scans when scratched or smeared.
-            Reprint anytime; the code never changes.
-          </p>
-        </div>
-        <div className="px-5 pb-5">
-          <button onClick={()=>window.print()}
-            className="tap w-full bg-ink text-white rounded-xl py-3.5 font-semibold flex items-center justify-center gap-2">
-            <I.print className="w-5 h-5"/> Print tag
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-/* ---------------------------------------------------------------- Tool sheet */
-function ToolSheet({tool, onClose, onCheckout, onCheckin, onMaint, onPrint}){
-  const [mode,setMode] = useState(null); // 'out' | 'in'
-  const [tech,setTech] = useState('t1');
-  const [site,setSite] = useState(SITES[0]);
-  const [note,setNote] = useState('');
-  const [cond,setCond] = useState('Good');
-  const [photo,setPhoto] = useState(null);
-
-  function pickPhoto(e){
-    const f=e.target.files && e.target.files[0]; if(!f) return;
-    const r=new FileReader(); r.onload=()=>setPhoto(r.result); r.readAsDataURL(f);
+    return c;
+  }
+  function renderHeader(){
+    var c=counts();
+    document.getElementById('header').innerHTML =
+      '<div class="hdr">'+
+        '<div class="hdr-top"><div><div class="wordmark">PYRAMID</div><div class="sub">Tool Control</div></div>'+
+        '<span class="demo">DEMO</span></div>'+
+        '<div class="stats">'+
+          '<div class="stat"><b class="t-out">'+c.out+'</b><span>Out</span></div>'+
+          '<div class="stat"><b class="t-av">'+c.av+'</b><span>Available</span></div>'+
+          '<div class="stat"><b class="t-mt">'+c.mt+'</b><span>Maint.</span></div>'+
+          '<div class="stat"><b class="t-od">'+c.od+'</b><span>Overdue</span></div>'+
+        '</div>'+
+      '</div>';
+    document.getElementById('banner').innerHTML = S.banner ?
+      '<div class="banner"><span>Sample data. Live camera scanning needs HTTPS (deploy to test on a phone). Production saves to Supabase.</span>'+
+      '<button onclick="TC.hideBanner()">&times;</button></div>' : '';
   }
 
-  return (
-    <div className="fixed inset-0 z-40 bg-ink/60 flex items-end sm:items-center sm:justify-center" onClick={onClose}>
-      <div className="bg-paper w-full sm:max-w-md rounded-t-2xl sm:rounded-2xl max-h-[92vh] overflow-y-auto" onClick={e=>e.stopPropagation()}>
-        {/* header */}
-        <div className="sticky top-0 bg-ink text-white px-5 py-4 flex items-start justify-between">
-          <div className="min-w-0">
-            <div className="mono text-korange text-sm font-bold">{tool.assetId}</div>
-            <h2 className="display text-2xl font-bold leading-tight truncate">{tool.name}</h2>
-            <div className="text-white/60 text-[13px]">{tool.manufacturer} {tool.model}</div>
-          </div>
-          <button className="text-white/70 tap shrink-0 ml-3" onClick={onClose}><I.x className="w-6 h-6"/></button>
-        </div>
+  /* ---------- icons ---------- */
+  var ICON={
+    scan:'<path d="M3 7V5a2 2 0 012-2h2M17 3h2a2 2 0 012 2v2M21 17v2a2 2 0 01-2 2h-2M7 21H5a2 2 0 01-2-2v-2"/><path d="M3 12h18"/>',
+    grid:'<rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/>',
+    log:'<path d="M8 6h11M8 12h11M8 18h11"/><circle cx="3.5" cy="6" r="1.2" fill="currentColor" stroke="none"/><circle cx="3.5" cy="12" r="1.2" fill="currentColor" stroke="none"/><circle cx="3.5" cy="18" r="1.2" fill="currentColor" stroke="none"/>',
+    plus:'<path d="M12 5v14M5 12h14"/>',
+    cam:'<path d="M3 8a2 2 0 012-2h2l1.5-2h7L18 6h1a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V8z"/><circle cx="12" cy="12.5" r="3.2"/>',
+    print:'<path d="M6 9V3h12v6"/><rect x="4" y="9" width="16" height="8" rx="2"/><path d="M8 17h8v4H8z"/>',
+    wrench:'<path d="M14.5 6.5a3.5 3.5 0 01-4.6 4.6l-5 5a1.7 1.7 0 102.4 2.4l5-5a3.5 3.5 0 004.6-4.6l-2 2-2.4-2.4 2-2z"/>'
+  };
+  function svg(name,cls){ return '<svg '+(cls?'class="'+cls+'" ':'')+'viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="20" height="20">'+ICON[name]+'</svg>'; }
 
-        <div className="p-5 space-y-5">
-          <div className="flex items-center justify-between">
-            <Pill tool={tool}/>
-            <button onClick={onPrint} className="tap text-sm font-semibold text-ink flex items-center gap-1.5">
-              <I.print className="w-4 h-4"/> Print tag
-            </button>
-          </div>
-
-          {/* who has it */}
-          {tool.status==='out' && (
-            <div className="bg-white rounded-xl p-4 flex items-center gap-3 border border-black/5">
-              <Avatar id={tool.holder} size={40}/>
-              <div className="min-w-0">
-                <div className="font-semibold text-ink">{techName(tool.holder)}</div>
-                <div className="text-[13px] text-steel truncate">{tool.jobSite} · out {ago(tool.lastActionAt)}</div>
-              </div>
-            </div>
-          )}
-
-          {/* spec grid */}
-          <div className="bg-white rounded-xl p-4 grid grid-cols-2 gap-4 border border-black/5">
-            <Field label="Serial number"><span className="mono text-[13px]">{tool.serial}</span></Field>
-            <Field label="Category">{tool.category}</Field>
-            <Field label="Replacement value">{money(tool.value)}</Field>
-            <Field label="Last condition">{tool.condition}</Field>
-            <Field label="Last seen"><span className="capitalize">{ago(tool.lastActionAt)}</span></Field>
-            <Field label="Location">{tool.jobSite}</Field>
-          </div>
-
-          {tool.notes && (
-            <div className="bg-white rounded-xl p-4 border border-black/5">
-              <Field label="Notes">{tool.notes}</Field>
-            </div>
-          )}
-
-          {/* action area */}
-          {mode===null && (
-            <div className="grid grid-cols-1 gap-2.5">
-              {tool.status==='available' && (
-                <button onClick={()=>setMode('out')} className="tap bg-korange text-white rounded-xl py-3.5 font-semibold text-[15px]">Check out</button>
-              )}
-              {tool.status==='out' && (
-                <button onClick={()=>setMode('in')} className="tap bg-kgreen text-white rounded-xl py-3.5 font-semibold text-[15px]">Check in</button>
-              )}
-              {tool.status!=='maintenance' && (
-                <button onClick={()=>{onMaint(tool); }} className="tap bg-white text-amber2 border border-amber2/30 rounded-xl py-3 font-semibold text-[14px] flex items-center justify-center gap-2">
-                  <I.wrench className="w-4 h-4"/> Send to maintenance
-                </button>
-              )}
-              {tool.status==='maintenance' && (
-                <button onClick={()=>{onCheckin(tool,{tech:'t5',cond:'Good',note:'Returned from service.',photo:null}); }} className="tap bg-kgreen text-white rounded-xl py-3.5 font-semibold text-[15px]">Return to service (Available)</button>
-              )}
-            </div>
-          )}
-
-          {/* check OUT form */}
-          {mode==='out' && (
-            <div className="bg-white rounded-xl p-4 border border-black/5 space-y-3">
-              <div className="display text-lg font-bold">Check out to…</div>
-              <label className="block text-[13px] font-semibold text-steel">Technician
-                <select value={tech} onChange={e=>setTech(e.target.value)} className="mt-1 w-full bg-paper rounded-lg px-3 py-2.5 text-ink font-normal">
-                  {TECHS.filter(t=>t.id!=='t5').map(t=> <option key={t.id} value={t.id}>{t.name}</option>)}
-                </select>
-              </label>
-              <label className="block text-[13px] font-semibold text-steel">Job site
-                <select value={site} onChange={e=>setSite(e.target.value)} className="mt-1 w-full bg-paper rounded-lg px-3 py-2.5 text-ink font-normal">
-                  {SITES.map(s=> <option key={s} value={s}>{s}</option>)}
-                </select>
-              </label>
-              <label className="block text-[13px] font-semibold text-steel">Note (optional)
-                <input value={note} onChange={e=>setNote(e.target.value)} placeholder="e.g. needs charged battery"
-                  className="mt-1 w-full bg-paper rounded-lg px-3 py-2.5 text-ink font-normal"/>
-              </label>
-              <div className="flex gap-2 pt-1">
-                <button onClick={()=>setMode(null)} className="tap flex-1 py-3 rounded-xl font-semibold text-steel bg-paper">Cancel</button>
-                <button onClick={()=>onCheckout(tool,{tech,site,note})} className="tap flex-[2] py-3 rounded-xl font-semibold text-white bg-korange">Confirm check out</button>
-              </div>
-            </div>
-          )}
-
-          {/* check IN form */}
-          {mode==='in' && (
-            <div className="bg-white rounded-xl p-4 border border-black/5 space-y-3">
-              <div className="display text-lg font-bold">Check in</div>
-              <div>
-                <div className="text-[13px] font-semibold text-steel mb-1.5">Condition on return</div>
-                <div className="grid grid-cols-3 gap-2">
-                  {['Good','Needs attention','Damaged'].map(c=>(
-                    <button key={c} onClick={()=>setCond(c)}
-                      className={"py-2 rounded-lg text-[12.5px] font-semibold border "+(cond===c?'bg-ink text-white border-ink':'bg-paper text-steel border-transparent')}>{c}</button>
-                  ))}
-                </div>
-              </div>
-              <label className="block text-[13px] font-semibold text-steel">Photo on return (optional)
-                <div className="mt-1.5 flex items-center gap-3">
-                  <label className="tap inline-flex items-center gap-2 bg-paper rounded-lg px-3 py-2.5 text-ink font-normal cursor-pointer">
-                    <I.cam className="w-5 h-5 text-steel"/> {photo?'Retake':'Take photo'}
-                    <input type="file" accept="image/*" capture="environment" onChange={pickPhoto} className="hidden"/>
-                  </label>
-                  {photo && <img src={photo} alt="return condition" className="w-12 h-12 rounded-lg object-cover border border-black/10"/>}
-                </div>
-              </label>
-              <label className="block text-[13px] font-semibold text-steel">Note (optional)
-                <input value={note} onChange={e=>setNote(e.target.value)} placeholder="e.g. chuck sticking"
-                  className="mt-1 w-full bg-paper rounded-lg px-3 py-2.5 text-ink font-normal"/>
-              </label>
-              <div className="flex gap-2 pt-1">
-                <button onClick={()=>setMode(null)} className="tap flex-1 py-3 rounded-xl font-semibold text-steel bg-paper">Cancel</button>
-                <button onClick={()=>onCheckin(tool,{tech:'t5',cond,note,photo})} className="tap flex-[2] py-3 rounded-xl font-semibold text-white bg-kgreen">Confirm check in</button>
-              </div>
-            </div>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-/* ---------------------------------------------------------------- Scan view */
-function ScanView({tools, onResolve}){
-  const [camState,setCamState] = useState('idle'); // idle | running | error
-  const [manual,setManual] = useState('');
-  const scannerRef = useRef(null);
-
-  async function startCam(){
-    if(!window.Html5Qrcode){ setCamState('error'); return; }
-    try{
-      const s = new window.Html5Qrcode('reader');
-      scannerRef.current = s;
-      await s.start({ facingMode:'environment' }, { fps:10, qrbox:{width:230,height:230} },
-        (decoded)=>{ stopCam(); handle(decoded.trim()); },
-        ()=>{});
-      setCamState('running');
-    }catch(e){ setCamState('error'); }
-  }
-  function stopCam(){
-    const s = scannerRef.current;
-    if(s){ s.stop().then(()=>s.clear()).catch(()=>{}); scannerRef.current=null; }
-    setCamState('idle');
-  }
-  useEffect(()=>()=>stopCam(),[]);
-
-  function handle(code){
-    const hit = tools.find(t=> t.assetId.toLowerCase()===code.toLowerCase());
-    if(hit) onResolve(hit);
-    else alert('No tool found for "'+code+'". Try an asset ID like PYR-0003.');
+  /* ---------- views ---------- */
+  function viewScan(){
+    var running = S.scanState==='running';
+    var h='<div class="view">';
+    h+='<h1 class="title">Scan a tool tag</h1>';
+    h+='<p class="muted">Point the camera at the QR tag to pull up the tool.</p>';
+    h+='<div class="viewfinder"><div id="reader"></div><div class="reticle"><i></i><i></i><i></i><i></i></div>';
+    if(running){ h+='<div class="scanline"></div>'; }
+    else { h+='<div class="vf-overlay"><div><div style="margin-bottom:14px">Camera is off</div>'+
+      '<button class="btn btn-o" style="width:auto;padding:12px 22px;display:inline-flex" onclick="TC.startCam()">'+svg('cam')+'Start camera</button></div></div>'; }
+    h+='</div>';
+    if(S.scanState==='error'){
+      h+='<div class="card" style="background:var(--amberSoft);border:0;color:var(--amber);font-size:13px;padding:12px 14px">'+
+        'Camera needs a secure (HTTPS) connection. Deploy to your site to scan on a phone — for now use the demo tags or manual entry below.</div>';
+    }
+    h+='<div class="card"><div class="lbl">Enter asset ID manually</div>'+
+      '<div style="display:flex;gap:8px"><input id="manual" class="input mono" placeholder="PYR-0003" />'+
+      '<button class="btn btn-d" style="width:auto;padding:0 20px" onclick="TC.manual()">Go</button></div></div>';
+    h+='<div class="lbl">Or tap a tag to simulate a scan</div><div class="chips">';
+    S.tools.slice(0,6).forEach(function(t){
+      h+='<button class="chip mono" onclick="TC.resolve(\''+t.assetId+'\')">'+t.assetId+
+         '<span class="dot" style="background:'+dotColor(t.status)+'"></span></button>';
+    });
+    h+='</div></div>';
+    return h;
   }
 
-  return (
-    <div className="p-5 pb-28">
-      <h1 className="display text-2xl font-bold mb-1">Scan a tool tag</h1>
-      <p className="text-steel text-[14px] mb-4">Point the camera at the QR tag to pull up the tool.</p>
-
-      {/* viewfinder */}
-      <div className="relative bg-ink rounded-2xl overflow-hidden aspect-square mb-3">
-        <div id="reader" className="w-full h-full"></div>
-        {camState!=='running' && (
-          <div className="absolute inset-0 grid place-items-center text-center px-6">
-            <div>
-              <div className="reticle absolute inset-0 pointer-events-none"><span className="c1"></span><span className="c2"></span></div>
-              <div className="text-white/80 text-[14px] mb-4 relative">Camera is off</div>
-              <button onClick={startCam} className="tap relative bg-korange text-white px-6 py-3 rounded-xl font-semibold inline-flex items-center gap-2">
-                <I.cam className="w-5 h-5"/> Start camera
-              </button>
-            </div>
-          </div>
-        )}
-        {camState==='running' && (<><div className="reticle absolute inset-0 pointer-events-none"><span className="c1"></span><span className="c2"></span></div><div className="scanline"></div></>)}
-      </div>
-
-      {camState==='error' && (
-        <div className="bg-amberSoft text-amber2 text-[13px] rounded-xl px-4 py-3 mb-3">
-          Camera needs a secure (HTTPS) connection. Deploy to Netlify to scan on a phone — for now, use the demo tools or manual entry below.
-        </div>
-      )}
-
-      {/* manual */}
-      <div className="bg-white rounded-xl p-4 border border-black/5 mb-4">
-        <div className="text-[11px] uppercase tracking-wider text-steel font-semibold mb-2">Enter asset ID manually</div>
-        <div className="flex gap-2">
-          <input value={manual} onChange={e=>setManual(e.target.value)} placeholder="PYR-0003"
-            className="mono flex-1 bg-paper rounded-lg px-3 py-2.5 text-ink"/>
-          <button onClick={()=>manual && handle(manual.trim())} className="tap bg-ink text-white px-5 rounded-lg font-semibold">Go</button>
-        </div>
-      </div>
-
-      {/* simulate */}
-      <div className="text-[11px] uppercase tracking-wider text-steel font-semibold mb-2">Or tap a tag to simulate a scan</div>
-      <div className="flex flex-wrap gap-2">
-        {tools.slice(0,6).map(t=>(
-          <button key={t.assetId} onClick={()=>handle(t.assetId)}
-            className="tap mono text-[12px] bg-white border border-black/10 rounded-lg px-3 py-2 text-ink">
-            {t.assetId}
-            <span className={"ml-2 inline-block w-2 h-2 rounded-full align-middle "+(t.status==='available'?'bg-kgreen':t.status==='out'?'bg-korange':'bg-amber2')}></span>
-          </button>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-/* ---------------------------------------------------------------- Tools view */
-function ToolsView({tools, onOpen}){
-  const [q,setQ] = useState('');
-  const [filter,setFilter] = useState('all');
-  const filtered = useMemo(()=>{
-    return tools.filter(t=>{
-      if(filter==='overdue' && !isOverdue(t)) return false;
-      if(filter!=='all' && filter!=='overdue' && t.status!==filter) return false;
+  function viewTools(){
+    var q=(S._q||'').toLowerCase(), f=S._filter||'all';
+    var list=S.tools.filter(function(t){
+      if(f==='overdue'){ if(!overdue(t)) return false; }
+      else if(f!=='all' && t.status!==f) return false;
       if(!q) return true;
-      const s=(t.name+' '+t.assetId+' '+t.serial+' '+t.manufacturer+' '+t.model).toLowerCase();
-      return s.includes(q.toLowerCase());
+      return (t.name+' '+t.assetId+' '+t.serial+' '+t.manufacturer+' '+t.model).toLowerCase().indexOf(q)>=0;
     });
-  },[tools,q,filter]);
-
-  const chips=[['all','All'],['available','Available'],['out','Out'],['overdue','Overdue'],['maintenance','Maint.']];
-  return (
-    <div className="p-5 pb-28">
-      <h1 className="display text-2xl font-bold mb-3">Tools</h1>
-      <input value={q} onChange={e=>setQ(e.target.value)} placeholder="Search name, serial, asset ID…"
-        className="w-full bg-white border border-black/5 rounded-xl px-4 py-3 mb-3 text-ink"/>
-      <div className="flex gap-2 mb-4 overflow-x-auto pb-1">
-        {chips.map(([k,l])=>(
-          <button key={k} onClick={()=>setFilter(k)}
-            className={"shrink-0 px-3.5 py-1.5 rounded-full text-[13px] font-semibold border "+(filter===k?'bg-ink text-white border-ink':'bg-white text-steel border-black/10')}>{l}</button>
-        ))}
-      </div>
-
-      {filtered.length===0 && <div className="text-center text-steel py-16">No tools match that. Try clearing the filter.</div>}
-
-      <div className="space-y-2.5">
-        {filtered.map(t=>(
-          <button key={t.assetId} onClick={()=>onOpen(t)}
-            className="tap w-full bg-white rounded-xl p-3.5 border border-black/5 flex items-center gap-3 text-left">
-            <div className="w-11 h-11 rounded-lg bg-paper grid place-items-center shrink-0">
-              <span className={"w-2.5 h-2.5 rounded-full "+(t.status==='available'?'bg-kgreen':t.status==='out'?'bg-korange':'bg-amber2')}></span>
-            </div>
-            <div className="min-w-0 flex-1">
-              <div className="flex items-center gap-2">
-                <span className="mono text-[12px] text-steel">{t.assetId}</span>
-                {isOverdue(t) && <span className="text-[10px] font-bold text-red2">OVERDUE</span>}
-              </div>
-              <div className="display text-[17px] font-semibold text-ink leading-tight truncate">{t.name}</div>
-              <div className="text-[12.5px] text-steel truncate">
-                {t.status==='out' ? `${techName(t.holder)} · ${t.jobSite}` : `${t.manufacturer} ${t.model}`}
-              </div>
-            </div>
-            <Pill tool={t}/>
-          </button>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-/* ---------------------------------------------------------------- Activity view */
-function ActivityView({activity}){
-  const A = { out:{c:'text-korange',v:'Checked out'}, in:{c:'text-kgreen',v:'Checked in'}, maintenance:{c:'text-amber2',v:'To maintenance'}, enrolled:{c:'text-ink',v:'Enrolled'} };
-  return (
-    <div className="p-5 pb-28">
-      <h1 className="display text-2xl font-bold mb-3">Activity</h1>
-      {activity.length===0 && <div className="text-center text-steel py-16">No activity yet. Scan a tool to get started.</div>}
-      <div className="space-y-2.5">
-        {activity.map(a=>{
-          const meta=A[a.action]||A.out;
-          return (
-            <div key={a.id} className="bg-white rounded-xl p-3.5 border border-black/5 flex gap-3">
-              <Avatar id={a.techId} size={36}/>
-              <div className="min-w-0 flex-1">
-                <div className="flex items-center justify-between gap-2">
-                  <span className={"text-[12px] font-bold uppercase tracking-wide "+meta.c}>{meta.v}</span>
-                  <span className="text-[11px] text-steel">{ago(a.ts)}</span>
-                </div>
-                <div className="display text-[16px] font-semibold text-ink leading-tight">
-                  {a.toolName} <span className="mono text-[12px] text-steel font-normal">{a.assetId}</span>
-                </div>
-                <div className="text-[12.5px] text-steel">
-                  {techName(a.techId)} · {a.jobSite}
-                  {a.condition && <span> · {a.condition}</span>}
-                </div>
-                {a.note && <div className="text-[12.5px] text-ink/70 mt-0.5 italic">“{a.note}”</div>}
-              </div>
-            </div>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
-
-/* ---------------------------------------------------------------- Enroll view */
-function EnrollView({nextId, onEnroll}){
-  const [f,setF] = useState({ name:'', manufacturer:'', model:'', serial:'', value:'', category:'Power tool' });
-  const set=(k,v)=>setF(s=>({...s,[k]:v}));
-  const ready = f.name && f.serial;
-  return (
-    <div className="p-5 pb-28">
-      <h1 className="display text-2xl font-bold mb-1">Enroll a tool</h1>
-      <p className="text-steel text-[14px] mb-4">New tools get the next asset ID and a printable tag right away.</p>
-
-      <div className="bg-ink text-white rounded-xl p-4 mb-4 flex items-center justify-between">
-        <span className="text-[12px] uppercase tracking-wider text-white/60">Will be assigned</span>
-        <span className="mono text-xl font-bold text-korange">{nextId}</span>
-      </div>
-
-      <div className="bg-white rounded-xl p-4 border border-black/5 space-y-3">
-        {[['name','Tool name','e.g. Hammer Drill'],['manufacturer','Manufacturer','e.g. Milwaukee'],['model','Model','e.g. 2904-20'],['serial','Serial number','from the nameplate'],['value','Replacement value ($)','329']].map(([k,l,p])=>(
-          <label key={k} className="block text-[13px] font-semibold text-steel">{l}
-            <input value={f[k]} onChange={e=>set(k,e.target.value)} placeholder={p}
-              className={(k==='serial'?'mono ':'')+"mt-1 w-full bg-paper rounded-lg px-3 py-2.5 text-ink font-normal"}/>
-          </label>
-        ))}
-        <label className="block text-[13px] font-semibold text-steel">Category
-          <select value={f.category} onChange={e=>set('category',e.target.value)} className="mt-1 w-full bg-paper rounded-lg px-3 py-2.5 text-ink font-normal">
-            {['Power tool','Equipment','Instrument','Hand tool'].map(c=><option key={c}>{c}</option>)}
-          </select>
-        </label>
-        <button disabled={!ready} onClick={()=>onEnroll({ ...f, value: Number(f.value)||0 })}
-          className={"tap w-full rounded-xl py-3.5 font-semibold text-white "+(ready?'bg-korange':'bg-steel/40')}>
-          Enroll & print tag
-        </button>
-      </div>
-    </div>
-  );
-}
-
-/* ---------------------------------------------------------------- App */
-function App(){
-  const [tab,setTab] = useState('scan');
-  const [tools,setTools] = useState(()=> safeStore.get('pyr_tools') || SEED_TOOLS);
-  const [activity,setActivity] = useState(()=> safeStore.get('pyr_activity') || SEED_ACTIVITY);
-  const [open,setOpen] = useState(null);   // tool in sheet
-  const [tag,setTag] = useState(null);     // tool in tag modal
-  const [toast,setToast] = useState(null);
-  const [banner,setBanner] = useState(true);
-
-  useEffect(()=>safeStore.set('pyr_tools',tools),[tools]);
-  useEffect(()=>safeStore.set('pyr_activity',activity),[activity]);
-
-  const counts = useMemo(()=>({
-    out: tools.filter(t=>t.status==='out').length,
-    avail: tools.filter(t=>t.status==='available').length,
-    maint: tools.filter(t=>t.status==='maintenance').length,
-    over: tools.filter(isOverdue).length,
-  }),[tools]);
-
-  function flash(msg){ setToast(msg); setTimeout(()=>setToast(null),2200); }
-  function logEntry(e){ setActivity(a=>[{ id:'a'+Date.now(), ts:Date.now(), ...e }, ...a]); }
-  function patchTool(assetId, patch){ setTools(ts=>ts.map(t=>t.assetId===assetId?{...t,...patch}:t)); }
-
-  function checkout(tool,{tech,site,note}){
-    patchTool(tool.assetId,{ status:'out', holder:tech, jobSite:site, lastActionAt:Date.now(), notes:note||tool.notes });
-    logEntry({ assetId:tool.assetId, toolName:tool.name, action:'out', techId:tech, jobSite:site, condition:null, note });
-    setOpen(null); flash(tool.name+' checked out to '+techName(tech));
-  }
-  function checkin(tool,{tech,cond,note,photo}){
-    patchTool(tool.assetId,{ status:'available', holder:null, jobSite:'Tool Crib', lastActionAt:Date.now(), condition:cond, notes:note||'', photo:photo||tool.photo });
-    logEntry({ assetId:tool.assetId, toolName:tool.name, action:'in', techId:tech, jobSite:'Tool Crib', condition:cond, note });
-    setOpen(null); flash(tool.name+' checked in · '+cond);
-  }
-  function maint(tool){
-    patchTool(tool.assetId,{ status:'maintenance', holder:null, jobSite:'Tool Crib', lastActionAt:Date.now() });
-    logEntry({ assetId:tool.assetId, toolName:tool.name, action:'maintenance', techId:'t5', jobSite:'Tool Crib', condition:'Needs attention', note:'' });
-    setOpen(null); flash(tool.name+' sent to maintenance');
-  }
-  const nextId = useMemo(()=>{
-    const n = tools.reduce((m,t)=>{ const v=parseInt((t.assetId||'').replace('PYR-',''),10); return isNaN(v)?m:Math.max(m,v); },0)+1;
-    return 'PYR-'+String(n).padStart(4,'0');
-  },[tools]);
-  function enroll(data){
-    const t = mk({ assetId:nextId, name:data.name, manufacturer:data.manufacturer, model:data.model, serial:data.serial,
-      value:data.value, category:data.category, status:'available', holder:null, jobSite:'Tool Crib', lastActionAt:Date.now() });
-    setTools(ts=>[t,...ts]);
-    logEntry({ assetId:t.assetId, toolName:t.name, action:'enrolled', techId:'t5', jobSite:'Tool Crib', condition:'Good', note:'' });
-    setTab('tools'); flash(t.assetId+' enrolled'); setTag(t);
+    var chips=[['all','All'],['available','Available'],['out','Out'],['overdue','Overdue'],['maintenance','Maint.']];
+    var h='<div class="view"><h1 class="title">Tools</h1>';
+    h+='<input id="search" class="input" style="margin-bottom:12px" placeholder="Search name, serial, asset ID…" value="'+esc(S._q||'')+'" oninput="TC.search(this.value)" />';
+    h+='<div class="chips" style="margin-bottom:16px;flex-wrap:nowrap;overflow-x:auto">';
+    chips.forEach(function(c){ h+='<button class="filterchip'+(f===c[0]?' on':'')+'" onclick="TC.filter(\''+c[0]+'\')">'+c[1]+'</button>'; });
+    h+='</div>';
+    if(!list.length) h+='<div class="empty">No tools match that. Try clearing the filter.</div>';
+    list.forEach(function(t){
+      var sub = t.status==='out' ? esc(tName(t.holder))+' · '+esc(t.jobSite) : esc(t.manufacturer)+' '+esc(t.model);
+      h+='<button class="row" onclick="TC.open(\''+t.assetId+'\')">'+
+        '<div class="swatch"><span class="dot" style="background:'+dotColor(t.status)+'"></span></div>'+
+        '<div class="grow"><div style="display:flex;align-items:center;gap:8px">'+
+          '<span class="mono" style="font-size:12px;color:var(--steel)">'+t.assetId+'</span>'+
+          (overdue(t)?'<span style="font-size:10px;font-weight:700;color:var(--red)">OVERDUE</span>':'')+'</div>'+
+          '<div class="name">'+esc(t.name)+'</div><div class="meta">'+sub+'</div></div>'+
+        pill(t)+'</button>';
+    });
+    h+='</div>';
+    return h;
   }
 
-  // keep open sheet in sync with latest tool data
-  const liveOpen = open ? tools.find(t=>t.assetId===open.assetId) : null;
+  function viewActivity(){
+    var A={out:['var(--orange)','Checked out'],'in':['var(--green)','Checked in'],maintenance:['var(--amber)','To maintenance'],enrolled:['var(--ink)','Enrolled']};
+    var h='<div class="view"><h1 class="title">Activity</h1>';
+    if(!S.activity.length) h+='<div class="empty">No activity yet. Scan a tool to get started.</div>';
+    S.activity.forEach(function(a){
+      var m=A[a.action]||A.out;
+      h+='<div class="ev"><div class="av" style="width:36px;height:36px;font-size:13px">'+tInit(a.techId)+'</div>'+
+        '<div class="grow"><div style="display:flex;justify-content:space-between;gap:8px">'+
+          '<span class="ttl" style="color:'+m[0]+'">'+m[1]+'</span>'+
+          '<span style="font-size:11px;color:var(--steel)">'+ago(a.ts)+'</span></div>'+
+        '<div class="disp" style="font-weight:600;font-size:16px;line-height:1.15">'+esc(a.toolName)+
+          ' <span class="mono" style="font-size:12px;color:var(--steel);font-weight:400">'+a.assetId+'</span></div>'+
+        '<div class="meta" style="white-space:normal">'+esc(tName(a.techId))+' · '+esc(a.jobSite)+(a.condition?' · '+esc(a.condition):'')+'</div>'+
+        (a.note?'<div style="font-size:12.5px;color:rgba(21,25,30,.7);font-style:italic;margin-top:2px">“'+esc(a.note)+'”</div>':'')+
+        '</div></div>';
+    });
+    h+='</div>';
+    return h;
+  }
 
-  return (
-    <div className="max-w-md mx-auto min-h-screen relative">
-      {/* header */}
-      <div className="bg-ink text-white px-5 pt-5 pb-4 sticky top-0 z-20">
-        <div className="flex items-center justify-between mb-3">
-          <div>
-            <div className="display text-2xl font-bold leading-none tracking-wide">PYRAMID</div>
-            <div className="text-korange text-[12px] font-semibold tracking-[0.2em] uppercase">Tool Control</div>
-          </div>
-          <span className="text-[10px] font-bold tracking-widest text-white/40 border border-white/20 rounded px-2 py-1">DEMO</span>
-        </div>
-        <div className="flex gap-2">
-          <Stat label="Out" value={counts.out} tone="out"/>
-          <Stat label="Available" value={counts.avail} tone="avail"/>
-          <Stat label="Maint." value={counts.maint} tone="maint"/>
-          <Stat label="Overdue" value={counts.over} tone="over"/>
-        </div>
-      </div>
+  function nextId(){
+    var max=0;
+    S.tools.forEach(function(t){ var v=parseInt(String(t.assetId).replace('PYR-',''),10); if(!isNaN(v)&&v>max) max=v; });
+    var n=String(max+1); while(n.length<4) n='0'+n; return 'PYR-'+n;
+  }
+  function viewEnroll(){
+    var fields=[['en_name','Tool name','e.g. Hammer Drill'],['en_man','Manufacturer','e.g. Milwaukee'],['en_model','Model','e.g. 2904-20'],['en_serial','Serial number','from the nameplate'],['en_value','Replacement value ($)','329']];
+    var h='<div class="view"><h1 class="title">Enroll a tool</h1>'+
+      '<p class="muted">New tools get the next asset ID and a printable tag right away.</p>'+
+      '<div class="card" style="background:var(--ink);color:#fff;display:flex;justify-content:space-between;align-items:center">'+
+        '<span style="font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:rgba(255,255,255,.6)">Will be assigned</span>'+
+        '<span class="mono" style="font-size:20px;font-weight:700;color:var(--orange)">'+nextId()+'</span></div>'+
+      '<div class="card">';
+    fields.forEach(function(f){
+      h+='<div style="margin-bottom:12px"><div class="lbl">'+f[1]+'</div>'+
+         '<input id="'+f[0]+'" class="input'+(f[0]==='en_serial'?' mono':'')+'" placeholder="'+f[2]+'" /></div>';
+    });
+    h+='<div style="margin-bottom:12px"><div class="lbl">Category</div><select id="en_cat" class="input">'+
+      ['Power tool','Equipment','Instrument','Hand tool'].map(function(c){return '<option>'+c+'</option>';}).join('')+'</select></div>';
+    h+='<button class="btn btn-o" onclick="TC.enroll()">Enroll &amp; print tag</button></div></div>';
+    return h;
+  }
 
-      {banner && (
-        <div className="bg-slate2 text-white/80 text-[12px] px-5 py-2.5 flex items-start gap-2">
-          <span className="flex-1">Sample data. Live camera scanning needs HTTPS (deploy to Netlify to test on a phone). Production saves to Supabase.</span>
-          <button onClick={()=>setBanner(false)} className="text-white/50 tap"><I.x className="w-4 h-4"/></button>
-        </div>
-      )}
+  /* ---------- sheet ---------- */
+  function renderSheet(){
+    var el=document.getElementById('sheet');
+    if(!S.openId){ el.innerHTML=''; return; }
+    var t=tool(S.openId); if(!t){ el.innerHTML=''; return; }
+    var h='<div class="scrim" onclick="TC.closeSheet(event)"><div class="sheet" onclick="event.stopPropagation()">';
+    h+='<div class="sheet-hd"><div style="min-width:0">'+
+        '<div class="mono" style="color:var(--orange);font-size:14px;font-weight:700">'+t.assetId+'</div>'+
+        '<div class="disp" style="font-size:24px;font-weight:700;line-height:1.1">'+esc(t.name)+'</div>'+
+        '<div style="color:rgba(255,255,255,.6);font-size:13px">'+esc(t.manufacturer)+' '+esc(t.model)+'</div></div>'+
+        '<button class="x" onclick="TC.closeSheet()">&times;</button></div>';
+    h+='<div class="sheet-bd">';
+    h+='<div style="display:flex;justify-content:space-between;align-items:center">'+pill(t)+
+       '<button onclick="TC.openTag(\''+t.assetId+'\')" style="font-size:14px;font-weight:600;color:var(--ink);display:flex;align-items:center;gap:6px">'+svg('print')+'Print tag</button></div>';
+    if(t.status==='out'){
+      h+='<div class="card" style="display:flex;gap:12px;align-items:center;margin:0">'+
+        '<div class="av" style="width:40px;height:40px;font-size:15px">'+tInit(t.holder)+'</div>'+
+        '<div class="grow"><div style="font-weight:600">'+esc(tName(t.holder))+'</div>'+
+        '<div class="meta">'+esc(t.jobSite)+' · out '+ago(t.lastActionAt)+'</div></div></div>';
+    }
+    h+='<div class="card specgrid" style="margin:0">'+
+      fld('Serial number','<span class="mono" style="font-size:13px">'+esc(t.serial)+'</span>')+
+      fld('Category',esc(t.category))+
+      fld('Replacement value',money(t.value))+
+      fld('Last condition',esc(t.condition))+
+      fld('Last seen',ago(t.lastActionAt))+
+      fld('Location',esc(t.jobSite))+'</div>';
+    if(t.notes) h+='<div class="card" style="margin:0">'+fld('Notes',esc(t.notes))+'</div>';
 
-      {/* views */}
-      {tab==='scan' && <ScanView tools={tools} onResolve={t=>setOpen(t)}/>}
-      {tab==='tools' && <ToolsView tools={tools} onOpen={t=>setOpen(t)}/>}
-      {tab==='activity' && <ActivityView activity={activity}/>}
-      {tab==='enroll' && <EnrollView nextId={nextId} onEnroll={enroll}/>}
+    if(S.sheetMode==='out'){
+      h+='<div class="card" style="margin:0;display:flex;flex-direction:column;gap:12px">'+
+        '<div class="disp" style="font-size:18px;font-weight:700">Check out to…</div>'+
+        '<div><div class="lbl">Technician</div><select id="co_tech" class="input">'+
+          TECHS.filter(function(x){return x.id!=='t5';}).map(function(x){return '<option value="'+x.id+'">'+x.name+'</option>';}).join('')+'</select></div>'+
+        '<div><div class="lbl">Job site</div><select id="co_site" class="input">'+
+          SITES.map(function(s){return '<option>'+s+'</option>';}).join('')+'</select></div>'+
+        '<div><div class="lbl">Note (optional)</div><input id="co_note" class="input" placeholder="e.g. needs charged battery" /></div>'+
+        '<div style="display:flex;gap:8px"><button class="btn btn-ghost" style="flex:1" onclick="TC.mode(null)">Cancel</button>'+
+        '<button class="btn btn-o" style="flex:2" onclick="TC.checkout()">Confirm check out</button></div></div>';
+    } else if(S.sheetMode==='in'){
+      var conds=['Good','Needs attention','Damaged'];
+      h+='<div class="card" style="margin:0;display:flex;flex-direction:column;gap:12px">'+
+        '<div class="disp" style="font-size:18px;font-weight:700">Check in</div>'+
+        '<div><div class="lbl">Condition on return</div><div class="condrow">'+
+          conds.map(function(c){return '<button class="condbtn'+(S.ci.cond===c?' on':'')+'" onclick="TC.setCond(\''+c+'\')">'+c+'</button>';}).join('')+'</div></div>'+
+        '<div><div class="lbl">Photo on return (optional)</div><div style="display:flex;align-items:center;gap:12px">'+
+          '<label class="btn btn-ghost" style="width:auto;padding:11px 14px;cursor:pointer">'+svg('cam')+'<span style="margin-left:6px">'+(S.ci.photo?'Retake':'Take photo')+'</span>'+
+          '<input type="file" accept="image/*" capture="environment" style="display:none" onchange="TC.photo(this)" /></label>'+
+          (S.ci.photo?'<img src="'+S.ci.photo+'" style="width:48px;height:48px;border-radius:10px;object-fit:cover;border:1px solid var(--line)" />':'')+'</div></div>'+
+        '<div><div class="lbl">Note (optional)</div><input id="ci_note" class="input" placeholder="e.g. chuck sticking" value="'+esc(S.ci.note||'')+'" /></div>'+
+        '<div style="display:flex;gap:8px"><button class="btn btn-ghost" style="flex:1" onclick="TC.mode(null)">Cancel</button>'+
+        '<button class="btn btn-g" style="flex:2" onclick="TC.checkin()">Confirm check in</button></div></div>';
+    } else {
+      h+='<div style="display:flex;flex-direction:column;gap:10px">';
+      if(t.status==='available') h+='<button class="btn btn-o" onclick="TC.mode(\'out\')">Check out</button>';
+      if(t.status==='out') h+='<button class="btn btn-g" onclick="TC.mode(\'in\')">Check in</button>';
+      if(t.status!=='maintenance') h+='<button class="btn btn-warn" onclick="TC.maint(\''+t.assetId+'\')">'+svg('wrench')+'Send to maintenance</button>';
+      if(t.status==='maintenance') h+='<button class="btn btn-g" onclick="TC.returnService(\''+t.assetId+'\')">Return to service (Available)</button>';
+      h+='</div>';
+    }
+    h+='</div></div></div>';
+    el.innerHTML=h;
+  }
+  function fld(l,v){ return '<div class="fld"><div class="lbl">'+l+'</div><div class="v">'+v+'</div></div>'; }
 
-      {/* bottom nav */}
-      <div className="fixed bottom-0 left-1/2 -translate-x-1/2 w-full max-w-md bg-white border-t border-black/10 grid grid-cols-4 z-20"
-           style={{paddingBottom:'env(safe-area-inset-bottom)'}}>
-        {[['scan','Scan',I.scan],['tools','Tools',I.grid],['activity','Activity',I.log],['enroll','Add',I.plus]].map(([k,l,Icon])=>(
-          <button key={k} onClick={()=>setTab(k)} className="tap py-2.5 flex flex-col items-center gap-1">
-            <Icon className={"w-6 h-6 "+(tab===k?'text-korange':'text-steel')}/>
-            <span className={"text-[11px] font-semibold "+(tab===k?'text-ink':'text-steel')}>{l}</span>
-          </button>
-        ))}
-      </div>
+  /* ---------- tag modal ---------- */
+  function renderModal(){
+    var el=document.getElementById('modal');
+    if(!S.tagId){ el.innerHTML=''; return; }
+    var t=tool(S.tagId); if(!t){ el.innerHTML=''; return; }
+    el.innerHTML =
+      '<div class="scrim center" onclick="TC.closeTag()"><div class="sheet" style="max-width:340px" onclick="event.stopPropagation()">'+
+        '<div style="padding:16px 18px;display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid var(--line)">'+
+          '<div class="disp" style="font-size:20px;font-weight:700">Asset tag</div>'+
+          '<button class="x" style="color:var(--steel)" onclick="TC.closeTag()">&times;</button></div>'+
+        '<div style="padding:24px;display:flex;flex-direction:column;align-items:center">'+
+          '<div id="print-tag" class="tagcard"><div class="qr" id="qrbox"></div>'+
+            '<div style="min-width:0"><div class="mono" style="font-size:10px;color:rgba(34,40,49,.7);font-weight:700;letter-spacing:.04em">PYRAMID · PROPERTY OF</div>'+
+            '<div class="mono" style="font-size:24px;font-weight:700;line-height:1.1">'+t.assetId+'</div>'+
+            '<div class="disp" style="font-size:15px;font-weight:600;color:var(--slate);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+esc(t.name)+'</div>'+
+            '<div style="font-size:10px;color:rgba(34,40,49,.7);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+esc(t.manufacturer)+' '+esc(t.model)+'</div></div></div>'+
+          '<p style="font-size:12px;color:var(--steel);margin:16px 0 0;text-align:center">QR error correction <span class="mono" style="font-weight:700;color:var(--ink)">H · 30%</span> — still scans when scratched or smeared. Reprint anytime; the code never changes.</p>'+
+        '</div>'+
+        '<div style="padding:0 18px 18px"><button class="btn btn-d" onclick="window.print()">'+svg('print')+'Print tag</button></div>'+
+      '</div></div>';
+    var box=document.getElementById('qrbox');
+    if(box && window.QRCode){
+      box.innerHTML='';
+      try{ new window.QRCode(box,{text:t.assetId,width:140,height:140,colorDark:'#15191E',colorLight:'#ffffff',correctLevel:window.QRCode.CorrectLevel.H}); }
+      catch(e){ box.innerHTML='<div style="width:140px;height:140px;display:grid;place-items:center;font-size:11px;color:#888;text-align:center">QR preview<br>unavailable offline</div>'; }
+    } else if(box){
+      box.innerHTML='<div style="width:140px;height:140px;display:grid;place-items:center;font-size:11px;color:#888;text-align:center">QR preview<br>unavailable offline</div>';
+    }
+  }
 
-      {liveOpen && <ToolSheet tool={liveOpen} onClose={()=>setOpen(null)}
-        onCheckout={checkout} onCheckin={checkin} onMaint={maint} onPrint={()=>setTag(liveOpen)}/>}
-      {tag && <TagModal tool={tag} onClose={()=>setTag(null)}/>}
+  /* ---------- nav + main render ---------- */
+  function renderNav(){
+    var items=[['scan','Scan','scan'],['tools','Tools','grid'],['activity','Activity','log'],['enroll','Add','plus']];
+    document.getElementById('nav').innerHTML='<div class="nav">'+items.map(function(it){
+      return '<button class="navbtn'+(S.tab===it[0]?' on':'')+'" onclick="TC.tab(\''+it[0]+'\')">'+svg(it[2])+'<span>'+it[1]+'</span></button>';
+    }).join('')+'</div>';
+  }
+  function renderView(){
+    var v=document.getElementById('view');
+    if(S.tab==='scan') v.innerHTML=viewScan();
+    else if(S.tab==='tools') v.innerHTML=viewTools();
+    else if(S.tab==='activity') v.innerHTML=viewActivity();
+    else if(S.tab==='enroll') v.innerHTML=viewEnroll();
+  }
+  function render(){ renderHeader(); renderView(); renderNav(); renderSheet(); renderModal(); }
 
-      {toast && (
-        <div className="fixed bottom-24 left-1/2 -translate-x-1/2 bg-ink text-white text-[14px] px-4 py-2.5 rounded-xl shadow-lg z-50 whitespace-nowrap">{toast}</div>
-      )}
-    </div>
-  );
-}
+  /* ---------- mutations ---------- */
+  function patch(id,obj){ var t=tool(id); if(t){ for(var k in obj) t[k]=obj[k]; } save('pyr_tools',S.tools); }
+  function log(e){ e.id='a'+Date.now(); e.ts=Date.now(); S.activity.unshift(e); save('pyr_activity',S.activity); }
+  function toast(msg){ var el=document.getElementById('toast'); el.textContent=msg; el.classList.remove('hidden');
+    clearTimeout(toast._t); toast._t=setTimeout(function(){ el.classList.add('hidden'); },2200); }
 
-ReactDOM.createRoot(document.getElementById('root')).render(<App/>);
+  /* ---------- controller (global for inline handlers) ---------- */
+  window.TC = {
+    hideBanner:function(){ S.banner=false; renderHeader(); },
+    tab:function(t){ if(S.tab==='scan' && t!=='scan') stopCam(); S.tab=t; S._q=''; render(); },
+    open:function(id){ S.openId=id; S.sheetMode=null; renderSheet(); },
+    closeSheet:function(ev){ if(ev && ev.type==='click' && ev.target!==ev.currentTarget) return; S.openId=null; S.sheetMode=null; renderSheet(); },
+    mode:function(m){ S.sheetMode=m; if(m==='in'){ S.ci={cond:'Good',photo:null,note:''}; } renderSheet(); },
+    setCond:function(c){ var n=document.getElementById('ci_note'); if(n) S.ci.note=n.value; S.ci.cond=c; renderSheet(); },
+    photo:function(input){ var f=input.files&&input.files[0]; if(!f) return; var n=document.getElementById('ci_note'); if(n) S.ci.note=n.value;
+      var r=new FileReader(); r.onload=function(){ S.ci.photo=r.result; renderSheet(); }; r.readAsDataURL(f); },
+    checkout:function(){
+      var t=tool(S.openId); if(!t) return;
+      var tech=document.getElementById('co_tech').value, site=document.getElementById('co_site').value, note=document.getElementById('co_note').value;
+      patch(t.assetId,{status:'out',holder:tech,jobSite:site,lastActionAt:Date.now(),notes:note||t.notes});
+      log({assetId:t.assetId,toolName:t.name,action:'out',techId:tech,jobSite:site,condition:null,note:note});
+      S.openId=null; S.sheetMode=null; render(); toast(t.name+' checked out to '+tName(tech));
+    },
+    checkin:function(){
+      var t=tool(S.openId); if(!t) return;
+      var note=(document.getElementById('ci_note')||{}).value||'';
+      patch(t.assetId,{status:'available',holder:null,jobSite:'Tool Crib',lastActionAt:Date.now(),condition:S.ci.cond,notes:note,photo:S.ci.photo||t.photo});
+      log({assetId:t.assetId,toolName:t.name,action:'in',techId:'t5',jobSite:'Tool Crib',condition:S.ci.cond,note:note});
+      S.openId=null; S.sheetMode=null; render(); toast(t.name+' checked in · '+S.ci.cond);
+    },
+    maint:function(id){ var t=tool(id); if(!t) return;
+      patch(id,{status:'maintenance',holder:null,jobSite:'Tool Crib',lastActionAt:Date.now()});
+      log({assetId:id,toolName:t.name,action:'maintenance',techId:'t5',jobSite:'Tool Crib',condition:'Needs attention',note:''});
+      S.openId=null; S.sheetMode=null; render(); toast(t.name+' sent to maintenance'); },
+    returnService:function(id){ var t=tool(id); if(!t) return;
+      patch(id,{status:'available',holder:null,jobSite:'Tool Crib',lastActionAt:Date.now(),condition:'Good'});
+      log({assetId:id,toolName:t.name,action:'in',techId:'t5',jobSite:'Tool Crib',condition:'Good',note:'Returned from service.'});
+      S.openId=null; render(); toast(t.name+' returned to service'); },
+    openTag:function(id){ S.tagId=id; renderModal(); },
+    closeTag:function(){ S.tagId=null; renderModal(); },
+    search:function(v){ S._q=v; var f=document.activeElement; renderView();
+      var s=document.getElementById('search'); if(s){ s.focus(); s.setSelectionRange(s.value.length,s.value.length); } },
+    filter:function(f){ S._filter=f; renderView(); },
+    manual:function(){ var v=(document.getElementById('manual')||{}).value||''; if(v.trim()) TC.resolve(v.trim()); },
+    resolve:function(code){
+      var hit=null; for(var i=0;i<S.tools.length;i++){ if(S.tools[i].assetId.toLowerCase()===String(code).toLowerCase()){ hit=S.tools[i]; break; } }
+      if(hit){ stopCam(); S.scanState='idle'; S.openId=hit.assetId; S.sheetMode=null; render(); }
+      else alert('No tool found for "'+code+'". Try an asset ID like PYR-0003.');
+    },
+    startCam:function(){
+      if(!window.Html5Qrcode){ S.scanState='error'; renderView(); return; }
+      try{
+        scanner=new window.Html5Qrcode('reader');
+        scanner.start({facingMode:'environment'},{fps:10,qrbox:{width:230,height:230}},
+          function(decoded){ TC.resolve(decoded.trim()); },
+          function(){}
+        ).then(function(){ S.scanState='running'; renderView(); })
+         .catch(function(){ S.scanState='error'; scanner=null; renderView(); });
+      }catch(e){ S.scanState='error'; renderView(); }
+    },
+    enroll:function(){
+      var name=v('en_name'), serial=v('en_serial');
+      if(!name||!serial){ alert('Tool name and serial number are required.'); return; }
+      var t=mk({assetId:nextId(),name:name,manufacturer:v('en_man'),model:v('en_model'),serial:serial,
+        value:Number(v('en_value'))||0,category:(document.getElementById('en_cat')||{}).value||'Power tool',
+        status:'available',holder:null,jobSite:'Tool Crib',lastActionAt:Date.now()});
+      S.tools.unshift(t); save('pyr_tools',S.tools);
+      log({assetId:t.assetId,toolName:t.name,action:'enrolled',techId:'t5',jobSite:'Tool Crib',condition:'Good',note:''});
+      S.tab='tools'; S.tagId=t.assetId; render(); toast(t.assetId+' enrolled');
+    }
+  };
+  function v(id){ var el=document.getElementById(id); return el?el.value.trim():''; }
+  function stopCam(){ if(scanner){ try{ scanner.stop().then(function(){scanner.clear();}).catch(function(){}); }catch(e){} scanner=null; } }
+
+  /* ---------- boot ---------- */
+  window.addEventListener('error', function(ev){
+    var v=document.getElementById('view');
+    if(v && !v.innerHTML){ v.innerHTML='<div class="view"><div class="card"><b>Something failed to load.</b><br><span style="font-size:13px;color:var(--steel)">'+esc(ev.message)+'</span></div></div>'; }
+  });
+  render();
+})();
 </script>
 </body>
 </html>
