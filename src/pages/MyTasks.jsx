@@ -61,41 +61,42 @@ export function MyTasks() {
   async function fetchTasks() {
     setLoading(true)
     try {
-      // Fetch tasks assigned to this user OR on projects where they are PM
-      const { data, error } = await supabase
-        .from('project_tasks')
-        .select(`
-          id, task_name, stage_number, due_date, status, notes,
-          assigned_role, is_recurring, recurrence_type,
-          project:projects(
-            id, project_number, project_address, division,
-            status, current_stage, pm_id
-          )
-        `)
-        .or(`assigned_to_id.eq.${profile.id},project.pm_id.eq.${profile.id}`)
-        .not('status', 'in', '("completed","skipped","na")')
-        .order('due_date', { ascending: true, nullsFirst: false })
+      const SELECT = `
+        id, task_name, stage_number, due_date, status, notes,
+        assigned_role, is_recurring, recurrence_type,
+        project:projects(
+          id, project_number, project_address, division,
+          status, current_stage, pm_id
+        )
+      `
+      const NOT_DONE = '("completed","skipped","na")'
 
+      // "My" tasks = assigned directly to me OR on a project I'm PM of.
+      // PostgREST can't OR a base column against an embedded one
+      // (project.pm_id) in a single query — that returns a 400. So resolve
+      // the projects I'm PM of first, then OR on project_id, which IS a base
+      // column on project_tasks and is therefore valid inside .or().
+      const { data: pmProjects } = await supabase
+        .from('projects')
+        .select('id')
+        .eq('pm_id', profile.id)
+      const pmIds = (pmProjects ?? []).map(p => p.id)
+
+      let query = supabase
+        .from('project_tasks')
+        .select(SELECT)
+        .not('status', 'in', NOT_DONE)
+
+      query = pmIds.length
+        ? query.or(`assigned_to_id.eq.${profile.id},project_id.in.(${pmIds.join(',')})`)
+        : query.eq('assigned_to_id', profile.id)
+
+      const { data, error } = await query
       if (error) {
         console.error('MyTasks fetch error:', error)
-        // Fallback: fetch only directly assigned tasks
-        const { data: fallback } = await supabase
-          .from('project_tasks')
-          .select(`
-            id, task_name, stage_number, due_date, status, notes,
-            assigned_role, is_recurring,
-            project:projects(
-              id, project_number, project_address, division,
-              status, current_stage, pm_id
-            )
-          `)
-          .eq('assigned_to_id', profile.id)
-          .not('status', 'in', '("completed","skipped","na")')
-          .order('due_date', { ascending: true, nullsFirst: false })
-
-        if (fallback) setTasks(fallback)
+        setTasks([])
       } else {
-        if (data) setTasks(data)
+        setTasks(data ?? [])
       }
     } catch (err) {
       console.error('MyTasks unexpected error:', err)
