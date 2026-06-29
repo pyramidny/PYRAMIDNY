@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/context/AuthContext'
@@ -99,6 +99,30 @@ function isImageMime(mime = '') {
   return mime.startsWith('image/')
 }
 
+// Derive the project's SharePoint *root folder* URL from any uploaded file's
+// webUrl. File URLs look like:  .../<ProjectFolder>/<top parent>/<subfolder>/<file>
+// where <top parent> is one of the three known parents. We cut the URL right
+// before that parent so the link opens the project root (showing Estimating /
+// Production / Photos) in SharePoint. Returns null if no file exists yet
+// (nothing to derive from — and an empty project has nothing to open anyway).
+function deriveProjectFolderUrl(docs = []) {
+  const markers = [
+    '/1.%20Estimating%20Phase', '/2.%20Production', '/3.%20Photos',
+    '/1. Estimating Phase',     '/2. Production',    '/3. Photos',
+  ]
+  for (const d of docs) {
+    const url = d?.sharepoint_url
+    if (!url) continue
+    let cut = -1
+    for (const mk of markers) {
+      const i = url.indexOf(mk)
+      if (i !== -1 && (cut === -1 || i < cut)) cut = i
+    }
+    if (cut > 0) return url.slice(0, cut)
+  }
+  return null
+}
+
 export default function ProjectDetail() {
   const { id } = useParams()
   const navigate = useNavigate()
@@ -149,6 +173,10 @@ export default function ProjectDetail() {
     if (!res.ok) throw new Error(json.error ?? `Proxy error ${res.status}`)
     return json.data
   }, [getAccessToken])
+
+  // Project root folder link for the "Open in SharePoint" buttons (Feature 2).
+  // Derived from existing files; null until at least one file is uploaded.
+  const projectFolderUrl = useMemo(() => deriveProjectFolderUrl(documents), [documents])
 
   useEffect(() => {
     if (!id) return
@@ -746,6 +774,20 @@ export default function ProjectDetail() {
             </div>
           )}
 
+          {/* Open the whole project folder in SharePoint (Feature 2) */}
+          {projectFolderUrl && (
+            <div className="mb-4">
+              <a
+                href={projectFolderUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1.5 text-xs font-medium bg-white border border-pyramid-300 text-pyramid-700 px-3 py-1.5 rounded-lg hover:bg-pyramid-50 transition-colors"
+              >
+                Open folder in SharePoint ↗
+              </a>
+            </div>
+          )}
+
           {/* Grouped by category */}
           {(() => {
             const docs = documents.filter(d => isDocCategory(d.category))
@@ -847,6 +889,20 @@ export default function ProjectDetail() {
               <span className="text-xs text-gray-400">
                 {documents.filter(d => isPhotoCategory(d.category)).length} photo{documents.filter(d => isPhotoCategory(d.category)).length !== 1 ? 's' : ''}
               </span>
+            </div>
+          )}
+
+          {/* Open the whole project folder in SharePoint (Feature 2) */}
+          {projectFolderUrl && (
+            <div className="mb-4">
+              <a
+                href={projectFolderUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1.5 text-xs font-medium bg-white border border-pyramid-300 text-pyramid-700 px-3 py-1.5 rounded-lg hover:bg-pyramid-50 transition-colors"
+              >
+                Open folder in SharePoint ↗
+              </a>
             </div>
           )}
 
