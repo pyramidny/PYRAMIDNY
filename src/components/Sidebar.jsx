@@ -2,7 +2,7 @@ import { NavLink, useNavigate } from 'react-router-dom'
 import {
   LayoutDashboard, FolderKanban, ClipboardList,
   Users, Settings, LogOut, ChevronRight,
-  HardHat, Anchor, Bell
+  HardHat, Anchor, Bell, ScanLine
 } from 'lucide-react'
 import { useAuth } from '@/context/AuthContext'
 
@@ -41,6 +41,7 @@ const NAV_SECTIONS = [
   {
     heading: 'Manage',
     items: [
+      { to: '/tools',    icon: ScanLine, label: 'Tool Control', adminOnly: true },
       { to: '/team',     icon: Users,    label: 'Team',     adminOnly: true },
       { to: '/settings', icon: Settings, label: 'Settings' },
     ],

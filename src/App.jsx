@@ -7,7 +7,7 @@ import { Login } from '@/pages/Login'
 import { MyTasks } from '@/pages/MyTasks'
 import NewProject from '@/pages/NewProject'
 import TeamManagement from '@/pages/TeamManagement'
-import { Team } from '@/pages/Placeholders'
+import { Team, ToolControl } from '@/pages/Placeholders'
 import Settings from '@/pages/Settings'
 import Notifications from '@/pages/Notifications'
 import ProjectDetail from '@/pages/ProjectDetail'
@@ -43,6 +43,7 @@ export default function App() {
         <Route path="/projects/new" element={<NewProject />} />
         <Route path="/projects/:id" element={<ProjectDetail />} />
         <Route path="/tasks" element={<MyTasks />} />
+        <Route path="/tools" element={<ToolControl />} />
         <Route path="/team" element={<TeamManagement />} />
         <Route path="/settings" element={<Settings />} />
         <Route path="/notifications" element={<Notifications />} />
