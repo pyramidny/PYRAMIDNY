@@ -1,0 +1,609 @@
+// src/pages/ToolControl.jsx
+// Route: /tools  —  Phase A: in-memory demo data (no Supabase yet).
+// Internal tabs are driven by ?tab= so the mobile bottom bar (Layout.jsx)
+// and the desktop top-tab strip share the same state.
+// Access: everyone can scan / view. Enrolling tools is gated to
+// isAdmin || profile.role === 'tool_manager'  (real role lands in Phase B).
+
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
+import {
+  ScanLine, LayoutGrid, ClipboardList, Plus, Printer, Wrench,
+  Camera, X, Search
+} from 'lucide-react'
+import QRCode from 'qrcode'
+import { Html5Qrcode } from 'html5-qrcode'
+import { useAuth } from '@/context/AuthContext'
+
+/* ---------------------------------------------------------------- demo data */
+const DAY = 86400000
+const now = Date.now()
+
+const TECHS = [
+  { id: 't1', name: 'Marcus Rivera', initials: 'MR' },
+  { id: 't2', name: 'Danny Cho', initials: 'DC' },
+  { id: 't3', name: 'Sofia Almeida', initials: 'SA' },
+  { id: 't4', name: 'Will Pruitt', initials: 'WP' },
+  { id: 't5', name: 'Tool Crib (return)', initials: 'TC' },
+]
+const SITES = [
+  'Yonkers — 3rd Ave', 'New Rochelle — Main St', 'White Plains — Court St',
+  'Stamford — Harbor Point', 'Tool Crib',
+]
+const mk = (o) => ({ category: 'Power tool', notes: '', photo: null, condition: 'Good', ...o })
+
+const SEED_TOOLS = [
+  mk({ assetId: 'PYR-0001', name: 'Hammer Drill', manufacturer: 'Milwaukee', model: '2904-20 M18 FUEL', serial: 'MWK2904-44871', value: 329, status: 'out', holder: 't1', jobSite: 'Yonkers — 3rd Ave', lastActionAt: now - 5.2 * DAY }),
+  mk({ assetId: 'PYR-0002', name: 'Rotary Hammer', manufacturer: 'Bosch', model: 'RH328VC', serial: 'BSH328-99120', value: 449, status: 'out', holder: 't2', jobSite: 'New Rochelle — Main St', lastActionAt: now - 0.4 * DAY }),
+  mk({ assetId: 'PYR-0003', name: 'Reciprocating Saw', manufacturer: 'DeWalt', model: 'DCS389 FLEXVOLT', serial: 'DWT389-21044', value: 299, status: 'available', holder: null, jobSite: 'Tool Crib', lastActionAt: now - 2.1 * DAY }),
+  mk({ assetId: 'PYR-0004', name: 'Angle Grinder', manufacturer: 'Makita', model: 'GA5070', serial: 'MKT5070-58823', value: 159, status: 'available', holder: null, jobSite: 'Tool Crib', lastActionAt: now - 9 * DAY }),
+  mk({ assetId: 'PYR-0005', name: 'Demolition Hammer', manufacturer: 'Hilti', model: 'TE 1000-AVR', serial: 'HLT1000-30277', value: 1899, status: 'maintenance', holder: null, jobSite: 'Tool Crib', lastActionAt: now - 1.3 * DAY, notes: 'Carbon brushes worn — sent to service center.', condition: 'Needs attention' }),
+  mk({ assetId: 'PYR-0006', name: 'Impact Driver', manufacturer: 'Milwaukee', model: '2853-20 M18', serial: 'MWK2853-71190', value: 179, status: 'available', holder: null, jobSite: 'Tool Crib', lastActionAt: now - 4 * DAY }),
+  mk({ assetId: 'PYR-0007', name: 'Wet/Dry Vacuum', manufacturer: 'Ridgid', model: 'WD1450', serial: 'RDG1450-66002', value: 139, status: 'out', holder: 't3', jobSite: 'Stamford — Harbor Point', lastActionAt: now - 1.9 * DAY }),
+  mk({ assetId: 'PYR-0008', name: 'Generator 3500W', manufacturer: 'Honda', model: 'EU3000iS', serial: 'HND3000-40551', value: 2199, status: 'available', holder: null, jobSite: 'Tool Crib', lastActionAt: now - 12 * DAY, category: 'Equipment' }),
+  mk({ assetId: 'PYR-0009', name: 'Rotary Laser Level', manufacturer: 'Bosch', model: 'GRL4000', serial: 'BSH4000-18834', value: 629, status: 'available', holder: null, jobSite: 'Tool Crib', lastActionAt: now - 6 * DAY, category: 'Instrument' }),
+  mk({ assetId: 'PYR-0010', name: 'Circular Saw', manufacturer: 'DeWalt', model: 'DCS570 ATOMIC', serial: 'DWT570-90123', value: 189, status: 'out', holder: 't4', jobSite: 'White Plains — Court St', lastActionAt: now - 6.7 * DAY }),
+]
+const SEED_ACTIVITY = [
+  { id: 'a1', ts: now - 5.2 * DAY, assetId: 'PYR-0001', toolName: 'Hammer Drill', action: 'out', techId: 't1', jobSite: 'Yonkers — 3rd Ave', condition: null, note: '' },
+  { id: 'a2', ts: now - 6.7 * DAY, assetId: 'PYR-0010', toolName: 'Circular Saw', action: 'out', techId: 't4', jobSite: 'White Plains — Court St', condition: null, note: '' },
+  { id: 'a3', ts: now - 2.1 * DAY, assetId: 'PYR-0003', toolName: 'Reciprocating Saw', action: 'in', techId: 't5', jobSite: 'Tool Crib', condition: 'Good', note: 'Blade replaced.' },
+  { id: 'a4', ts: now - 1.9 * DAY, assetId: 'PYR-0007', toolName: 'Wet/Dry Vacuum', action: 'out', techId: 't3', jobSite: 'Stamford — Harbor Point', condition: null, note: '' },
+  { id: 'a5', ts: now - 1.3 * DAY, assetId: 'PYR-0005', toolName: 'Demolition Hammer', action: 'maintenance', techId: 't5', jobSite: 'Tool Crib', condition: 'Needs attention', note: 'Carbon brushes worn.' },
+  { id: 'a6', ts: now - 0.4 * DAY, assetId: 'PYR-0002', toolName: 'Rotary Hammer', action: 'out', techId: 't2', jobSite: 'New Rochelle — Main St', condition: null, note: '' },
+]
+const OVERDUE_DAYS = 3
+
+/* ---------------------------------------------------------------- helpers */
+const tName = (id) => TECHS.find((t) => t.id === id)?.name ?? '—'
+const tInit = (id) => TECHS.find((t) => t.id === id)?.initials ?? '—'
+const isOverdue = (t) => t.status === 'out' && Date.now() - t.lastActionAt > OVERDUE_DAYS * DAY
+const money = (n) => '$' + Number(n || 0).toLocaleString()
+function ago(ts) {
+  const s = (Date.now() - ts) / 1000
+  if (s < 60) return 'just now'
+  if (s < 3600) return Math.floor(s / 60) + 'm ago'
+  if (s < 86400) return Math.floor(s / 3600) + 'h ago'
+  const d = Math.floor(s / 86400)
+  return d + (d === 1 ? ' day ago' : ' days ago')
+}
+const STATUS = {
+  available: { label: 'Available', cls: 'bg-emerald-100 text-emerald-700' },
+  out: { label: 'Checked out', cls: 'bg-pyramid-50 text-pyramid-600' },
+  maintenance: { label: 'Maintenance', cls: 'bg-amber-100 text-amber-700' },
+}
+const dotColor = (st) => (st === 'available' ? 'bg-emerald-500' : st === 'out' ? 'bg-pyramid-500' : 'bg-amber-500')
+
+/* ---------------------------------------------------------------- atoms */
+function Pill({ tool }) {
+  const s = STATUS[tool.status]
+  return (
+    <span className="inline-flex items-center gap-1.5">
+      <span className={`px-2 py-0.5 rounded-full text-[11px] font-semibold ${s.cls}`}>{s.label}</span>
+      {isOverdue(tool) && <span className="px-2 py-0.5 rounded-full text-[11px] font-semibold bg-red-100 text-red-700">Overdue</span>}
+    </span>
+  )
+}
+function Avatar({ id, size = 36 }) {
+  return (
+    <div className="rounded-full bg-ink-900 text-white grid place-items-center font-semibold flex-shrink-0"
+      style={{ width: size, height: size, fontSize: size * 0.36 }}>{tInit(id)}</div>
+  )
+}
+function Field({ label, children }) {
+  return (
+    <div>
+      <div className="text-[10px] font-semibold tracking-widest uppercase text-ink-400 mb-0.5">{label}</div>
+      <div className="text-sm text-ink-800">{children}</div>
+    </div>
+  )
+}
+
+/* ---------------------------------------------------------------- page */
+export default function ToolControl() {
+  const { isAdmin, profile } = useAuth()
+  const canManage = isAdmin || profile?.role === 'tool_manager'
+
+  const [params, setParams] = useSearchParams()
+  let tab = params.get('tab') || 'scan'
+  if (tab === 'enroll' && !canManage) tab = 'scan'
+  const setTab = (t) => setParams({ tab: t }, { replace: true })
+
+  const [tools, setTools] = useState(SEED_TOOLS)
+  const [activity, setActivity] = useState(SEED_ACTIVITY)
+  const [openId, setOpenId] = useState(null)
+  const [sheetMode, setSheetMode] = useState(null)
+  const [tagId, setTagId] = useState(null)
+  const [toast, setToast] = useState(null)
+
+  const openTool = tools.find((t) => t.assetId === openId) || null
+  const tagTool = tools.find((t) => t.assetId === tagId) || null
+
+  function flash(msg) { setToast(msg); clearTimeout(flash._t); flash._t = setTimeout(() => setToast(null), 2200) }
+  function patch(id, obj) { setTools((ts) => ts.map((t) => (t.assetId === id ? { ...t, ...obj } : t))) }
+  function log(e) { setActivity((a) => [{ id: 'a' + Date.now(), ts: Date.now(), ...e }, ...a]) }
+
+  const counts = useMemo(() => ({
+    out: tools.filter((t) => t.status === 'out').length,
+    avail: tools.filter((t) => t.status === 'available').length,
+    maint: tools.filter((t) => t.status === 'maintenance').length,
+    over: tools.filter(isOverdue).length,
+  }), [tools])
+
+  const nextId = useMemo(() => {
+    const n = tools.reduce((m, t) => {
+      const v = parseInt(String(t.assetId).replace('PYR-', ''), 10)
+      return isNaN(v) ? m : Math.max(m, v)
+    }, 0) + 1
+    return 'PYR-' + String(n).padStart(4, '0')
+  }, [tools])
+
+  /* actions */
+  function checkout(t, { tech, site, note }) {
+    patch(t.assetId, { status: 'out', holder: tech, jobSite: site, lastActionAt: Date.now(), notes: note || t.notes })
+    log({ assetId: t.assetId, toolName: t.name, action: 'out', techId: tech, jobSite: site, condition: null, note })
+    setOpenId(null); setSheetMode(null); flash(`${t.name} checked out to ${tName(tech)}`)
+  }
+  function checkin(t, { cond, note, photo }) {
+    patch(t.assetId, { status: 'available', holder: null, jobSite: 'Tool Crib', lastActionAt: Date.now(), condition: cond, notes: note || '', photo: photo || t.photo })
+    log({ assetId: t.assetId, toolName: t.name, action: 'in', techId: 't5', jobSite: 'Tool Crib', condition: cond, note })
+    setOpenId(null); setSheetMode(null); flash(`${t.name} checked in · ${cond}`)
+  }
+  function maint(t) {
+    patch(t.assetId, { status: 'maintenance', holder: null, jobSite: 'Tool Crib', lastActionAt: Date.now() })
+    log({ assetId: t.assetId, toolName: t.name, action: 'maintenance', techId: 't5', jobSite: 'Tool Crib', condition: 'Needs attention', note: '' })
+    setOpenId(null); setSheetMode(null); flash(`${t.name} sent to maintenance`)
+  }
+  function returnService(t) {
+    patch(t.assetId, { status: 'available', holder: null, jobSite: 'Tool Crib', lastActionAt: Date.now(), condition: 'Good' })
+    log({ assetId: t.assetId, toolName: t.name, action: 'in', techId: 't5', jobSite: 'Tool Crib', condition: 'Good', note: 'Returned from service.' })
+    setOpenId(null); flash(`${t.name} returned to service`)
+  }
+  function enroll(data) {
+    const t = mk({ assetId: nextId, ...data, status: 'available', holder: null, jobSite: 'Tool Crib', lastActionAt: Date.now() })
+    setTools((ts) => [t, ...ts])
+    log({ assetId: t.assetId, toolName: t.name, action: 'enrolled', techId: 't5', jobSite: 'Tool Crib', condition: 'Good', note: '' })
+    setTab('tools'); setTagId(t.assetId); flash(`${t.assetId} enrolled`)
+  }
+  function resolve(code) {
+    const hit = tools.find((t) => t.assetId.toLowerCase() === String(code).trim().toLowerCase())
+    if (hit) { setOpenId(hit.assetId); setSheetMode(null) }
+    else alert(`No tool found for "${code}". Try an asset ID like PYR-0003.`)
+  }
+
+  const DESKTOP_TABS = [
+    { k: 'scan', label: 'Scan', icon: ScanLine },
+    { k: 'tools', label: 'Tools', icon: LayoutGrid },
+    { k: 'activity', label: 'Activity', icon: ClipboardList },
+    ...(canManage ? [{ k: 'enroll', label: 'Add', icon: Plus }] : []),
+  ]
+
+  return (
+    <div className="min-h-full bg-ink-50">
+      {/* Header + live counts */}
+      <div className="bg-white border-b border-ink-200 px-6 pt-5 pb-0">
+        <div className="max-w-5xl mx-auto">
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <h1 className="text-xl font-condensed font-bold text-ink-900 tracking-wide">Tool Control</h1>
+              <p className="text-ink-400 text-sm mt-0.5">Scan a tag to check tools out and in.</p>
+            </div>
+            <div className="hidden sm:flex gap-2">
+              <Stat label="Out" value={counts.out} tone="text-pyramid-600" />
+              <Stat label="Available" value={counts.avail} tone="text-emerald-600" />
+              <Stat label="Maint." value={counts.maint} tone="text-amber-600" />
+              <Stat label="Overdue" value={counts.over} tone="text-red-600" />
+            </div>
+          </div>
+
+          {/* Desktop top-tab strip (mobile uses the swapped bottom bar) */}
+          <div className="hidden lg:flex gap-1 mt-4">
+            {DESKTOP_TABS.map((t) => (
+              <button key={t.k} onClick={() => setTab(t.k)}
+                className={`flex items-center gap-2 px-4 py-2.5 text-sm font-medium border-b-2 -mb-px transition-colors
+                  ${tab === t.k ? 'border-pyramid-500 text-ink-900' : 'border-transparent text-ink-400 hover:text-ink-700'}`}>
+                <t.icon size={16} className={tab === t.k ? 'text-pyramid-500' : ''} />
+                {t.label}
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {/* Body */}
+      <div className="max-w-5xl mx-auto px-6 py-6">
+        {tab === 'scan' && <ScanTab tools={tools} onResolve={resolve} />}
+        {tab === 'tools' && <ToolsTab tools={tools} onOpen={(id) => { setOpenId(id); setSheetMode(null) }} />}
+        {tab === 'activity' && <ActivityTab activity={activity} />}
+        {tab === 'enroll' && canManage && <EnrollTab nextId={nextId} onEnroll={enroll} />}
+      </div>
+
+      {openTool && (
+        <ToolSheet
+          tool={openTool} mode={sheetMode} setMode={setSheetMode}
+          onClose={() => { setOpenId(null); setSheetMode(null) }}
+          onCheckout={checkout} onCheckin={checkin} onMaint={maint}
+          onReturn={returnService} onPrint={() => setTagId(openTool.assetId)}
+        />
+      )}
+      {tagTool && <TagModal tool={tagTool} onClose={() => setTagId(null)} />}
+
+      {toast && (
+        <div className="fixed bottom-24 lg:bottom-6 left-1/2 -translate-x-1/2 bg-ink-900 text-white text-sm px-4 py-2.5 rounded-xl shadow-lg z-50 whitespace-nowrap">
+          {toast}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function Stat({ label, value, tone }) {
+  return (
+    <div className="w-20 rounded-lg bg-ink-50 border border-ink-200 px-2 py-1.5 text-center">
+      <div className={`font-condensed text-xl font-bold leading-none ${tone}`}>{value}</div>
+      <div className="text-[10px] uppercase tracking-wider text-ink-400 mt-0.5">{label}</div>
+    </div>
+  )
+}
+
+/* ---------------------------------------------------------------- Scan tab */
+function ScanTab({ tools, onResolve }) {
+  const [camState, setCamState] = useState('idle') // idle | running | error
+  const [manual, setManual] = useState('')
+  const scannerRef = useRef(null)
+
+  useEffect(() => () => stop(), [])
+  function stop() {
+    const s = scannerRef.current
+    if (s) { s.stop().then(() => s.clear()).catch(() => {}); scannerRef.current = null }
+  }
+  async function start() {
+    try {
+      const s = new Html5Qrcode('tc-reader')
+      scannerRef.current = s
+      await s.start({ facingMode: 'environment' }, { fps: 10, qrbox: { width: 230, height: 230 } },
+        (decoded) => { stop(); setCamState('idle'); onResolve(decoded.trim()) }, () => {})
+      setCamState('running')
+    } catch { setCamState('error') }
+  }
+
+  return (
+    <div className="max-w-md mx-auto">
+      <div className="relative bg-ink-950 rounded-2xl overflow-hidden aspect-square mb-3">
+        <div id="tc-reader" className="w-full h-full" />
+        <div className="pointer-events-none absolute inset-0">
+          {['top-4 left-4 border-l-2 border-t-2', 'top-4 right-4 border-r-2 border-t-2', 'bottom-4 left-4 border-l-2 border-b-2', 'bottom-4 right-4 border-r-2 border-b-2']
+            .map((c, i) => <span key={i} className={`absolute w-8 h-8 rounded border-pyramid-500 ${c}`} />)}
+        </div>
+        {camState !== 'running' && (
+          <div className="absolute inset-0 grid place-items-center text-center px-6">
+            <div>
+              <p className="text-ink-400 text-sm mb-4">Camera is off</p>
+              <button onClick={start} className="btn-primary inline-flex items-center gap-2 text-sm">
+                <Camera size={18} /> Start camera
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {camState === 'error' && (
+        <div className="bg-amber-50 text-amber-700 text-[13px] rounded-xl px-4 py-3 mb-3">
+          Camera needs a secure (HTTPS) connection and permission. Use the demo tags or manual entry below.
+        </div>
+      )}
+
+      <div className="card p-4 mb-4">
+        <div className="text-[10px] uppercase tracking-widest text-ink-400 font-semibold mb-2">Enter asset ID manually</div>
+        <div className="flex gap-2">
+          <input value={manual} onChange={(e) => setManual(e.target.value)} placeholder="PYR-0003" className="input font-mono" />
+          <button onClick={() => manual.trim() && onResolve(manual.trim())} className="btn-primary px-5">Go</button>
+        </div>
+      </div>
+
+      <div className="text-[10px] uppercase tracking-widest text-ink-400 font-semibold mb-2">Or tap a tag to simulate a scan</div>
+      <div className="flex flex-wrap gap-2">
+        {tools.slice(0, 6).map((t) => (
+          <button key={t.assetId} onClick={() => onResolve(t.assetId)}
+            className="font-mono text-[12px] bg-white border border-ink-200 rounded-lg px-3 py-2 text-ink-700">
+            {t.assetId}
+            <span className={`ml-2 inline-block w-2 h-2 rounded-full align-middle ${dotColor(t.status)}`} />
+          </button>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+/* ---------------------------------------------------------------- Tools tab */
+function ToolsTab({ tools, onOpen }) {
+  const [q, setQ] = useState('')
+  const [filter, setFilter] = useState('all')
+  const list = useMemo(() => tools.filter((t) => {
+    if (filter === 'overdue') { if (!isOverdue(t)) return false }
+    else if (filter !== 'all' && t.status !== filter) return false
+    if (!q) return true
+    return (t.name + ' ' + t.assetId + ' ' + t.serial + ' ' + t.manufacturer + ' ' + t.model).toLowerCase().includes(q.toLowerCase())
+  }), [tools, q, filter])
+
+  const chips = [['all', 'All'], ['available', 'Available'], ['out', 'Out'], ['overdue', 'Overdue'], ['maintenance', 'Maint.']]
+  return (
+    <div>
+      <div className="relative max-w-md mb-3">
+        <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-ink-400" />
+        <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search name, serial, asset ID…" className="input pl-9" />
+      </div>
+      <div className="flex gap-2 mb-4 overflow-x-auto pb-1">
+        {chips.map(([k, l]) => (
+          <button key={k} onClick={() => setFilter(k)}
+            className={`flex-shrink-0 px-3.5 py-1.5 rounded-full text-[13px] font-semibold border
+              ${filter === k ? 'bg-ink-900 text-white border-ink-900' : 'bg-white text-ink-500 border-ink-200'}`}>{l}</button>
+        ))}
+      </div>
+
+      {list.length === 0 && <div className="text-center text-ink-400 py-16">No tools match that.</div>}
+      <div className="space-y-2.5">
+        {list.map((t) => (
+          <button key={t.assetId} onClick={() => onOpen(t.assetId)}
+            className="card w-full p-3.5 flex items-center gap-3 text-left hover:border-ink-300 transition-colors">
+            <div className="w-11 h-11 rounded-lg bg-ink-50 grid place-items-center flex-shrink-0">
+              <span className={`w-2.5 h-2.5 rounded-full ${dotColor(t.status)}`} />
+            </div>
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-2">
+                <span className="font-mono text-[12px] text-ink-400">{t.assetId}</span>
+                {isOverdue(t) && <span className="text-[10px] font-bold text-red-600">OVERDUE</span>}
+              </div>
+              <div className="font-condensed text-[17px] font-semibold text-ink-900 leading-tight truncate">{t.name}</div>
+              <div className="text-[12.5px] text-ink-400 truncate">
+                {t.status === 'out' ? `${tName(t.holder)} · ${t.jobSite}` : `${t.manufacturer} ${t.model}`}
+              </div>
+            </div>
+            <Pill tool={t} />
+          </button>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+/* ---------------------------------------------------------------- Activity tab */
+function ActivityTab({ activity }) {
+  const META = {
+    out: ['text-pyramid-600', 'Checked out'], in: ['text-emerald-600', 'Checked in'],
+    maintenance: ['text-amber-600', 'To maintenance'], enrolled: ['text-ink-700', 'Enrolled'],
+  }
+  return (
+    <div className="max-w-2xl">
+      {activity.length === 0 && <div className="text-center text-ink-400 py-16">No activity yet.</div>}
+      <div className="space-y-2.5">
+        {activity.map((a) => {
+          const m = META[a.action] || META.out
+          return (
+            <div key={a.id} className="card p-3.5 flex gap-3">
+              <Avatar id={a.techId} />
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center justify-between gap-2">
+                  <span className={`text-[12px] font-bold uppercase tracking-wide ${m[0]}`}>{m[1]}</span>
+                  <span className="text-[11px] text-ink-400">{ago(a.ts)}</span>
+                </div>
+                <div className="font-condensed text-[16px] font-semibold text-ink-900 leading-tight">
+                  {a.toolName} <span className="font-mono text-[12px] text-ink-400 font-normal">{a.assetId}</span>
+                </div>
+                <div className="text-[12.5px] text-ink-400">
+                  {tName(a.techId)} · {a.jobSite}{a.condition ? ` · ${a.condition}` : ''}
+                </div>
+                {a.note && <div className="text-[12.5px] text-ink-500 italic mt-0.5">“{a.note}”</div>}
+              </div>
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
+/* ---------------------------------------------------------------- Enroll tab */
+function EnrollTab({ nextId, onEnroll }) {
+  const [f, setF] = useState({ name: '', manufacturer: '', model: '', serial: '', value: '', category: 'Power tool' })
+  const set = (k) => (e) => setF((s) => ({ ...s, [k]: e.target.value }))
+  const ready = f.name.trim() && f.serial.trim()
+  const fields = [
+    ['name', 'Tool name', 'e.g. Hammer Drill'], ['manufacturer', 'Manufacturer', 'e.g. Milwaukee'],
+    ['model', 'Model', 'e.g. 2904-20'], ['serial', 'Serial number', 'from the nameplate'],
+    ['value', 'Replacement value ($)', '329'],
+  ]
+  return (
+    <div className="max-w-md">
+      <div className="card p-4 mb-4 bg-ink-900 text-white flex items-center justify-between">
+        <span className="text-[11px] uppercase tracking-widest text-white/60">Will be assigned</span>
+        <span className="font-mono text-xl font-bold text-pyramid-500">{nextId}</span>
+      </div>
+      <div className="card p-4 space-y-3">
+        {fields.map(([k, label, ph]) => (
+          <label key={k} className="block text-[13px] font-semibold text-ink-500">{label}
+            <input value={f[k]} onChange={set(k)} placeholder={ph}
+              className={`input mt-1 font-normal ${k === 'serial' ? 'font-mono' : ''}`} />
+          </label>
+        ))}
+        <label className="block text-[13px] font-semibold text-ink-500">Category
+          <select value={f.category} onChange={set('category')} className="input mt-1 font-normal">
+            {['Power tool', 'Equipment', 'Instrument', 'Hand tool'].map((c) => <option key={c}>{c}</option>)}
+          </select>
+        </label>
+        <button disabled={!ready} onClick={() => onEnroll({ ...f, value: Number(f.value) || 0 })}
+          className="btn-primary w-full disabled:opacity-50">Enroll &amp; print tag</button>
+      </div>
+    </div>
+  )
+}
+
+/* ---------------------------------------------------------------- Tool sheet */
+function ToolSheet({ tool, mode, setMode, onClose, onCheckout, onCheckin, onMaint, onReturn, onPrint }) {
+  const [tech, setTech] = useState('t1')
+  const [site, setSite] = useState(SITES[0])
+  const [note, setNote] = useState('')
+  const [cond, setCond] = useState('Good')
+  const [photo, setPhoto] = useState(null)
+
+  function pickPhoto(e) {
+    const file = e.target.files?.[0]; if (!file) return
+    const r = new FileReader(); r.onload = () => setPhoto(r.result); r.readAsDataURL(file)
+  }
+
+  return (
+    <div className="fixed inset-0 z-40 bg-ink-950/60 flex items-end sm:items-center sm:justify-center" onClick={onClose}>
+      <div className="bg-ink-50 w-full sm:max-w-md rounded-t-2xl sm:rounded-2xl max-h-[92vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+        <div className="sticky top-0 bg-ink-950 text-white px-5 py-4 flex items-start justify-between">
+          <div className="min-w-0">
+            <div className="font-mono text-pyramid-500 text-sm font-bold">{tool.assetId}</div>
+            <h2 className="font-condensed text-2xl font-bold leading-tight truncate">{tool.name}</h2>
+            <div className="text-white/60 text-[13px]">{tool.manufacturer} {tool.model}</div>
+          </div>
+          <button className="text-white/70 flex-shrink-0 ml-3" onClick={onClose}><X size={24} /></button>
+        </div>
+
+        <div className="p-5 space-y-5">
+          <div className="flex items-center justify-between">
+            <Pill tool={tool} />
+            <button onClick={onPrint} className="text-sm font-semibold text-ink-900 flex items-center gap-1.5"><Printer size={16} /> Print tag</button>
+          </div>
+
+          {tool.status === 'out' && (
+            <div className="card p-4 flex items-center gap-3">
+              <Avatar id={tool.holder} size={40} />
+              <div className="min-w-0">
+                <div className="font-semibold text-ink-900">{tName(tool.holder)}</div>
+                <div className="text-[13px] text-ink-400 truncate">{tool.jobSite} · out {ago(tool.lastActionAt)}</div>
+              </div>
+            </div>
+          )}
+
+          <div className="card p-4 grid grid-cols-2 gap-4">
+            <Field label="Serial number"><span className="font-mono text-[13px]">{tool.serial}</span></Field>
+            <Field label="Category">{tool.category}</Field>
+            <Field label="Replacement value">{money(tool.value)}</Field>
+            <Field label="Last condition">{tool.condition}</Field>
+            <Field label="Last seen">{ago(tool.lastActionAt)}</Field>
+            <Field label="Location">{tool.jobSite}</Field>
+          </div>
+
+          {tool.notes && <div className="card p-4"><Field label="Notes">{tool.notes}</Field></div>}
+
+          {mode === null && (
+            <div className="space-y-2.5">
+              {tool.status === 'available' && <button onClick={() => setMode('out')} className="btn-primary w-full">Check out</button>}
+              {tool.status === 'out' && <button onClick={() => setMode('in')} className="w-full py-3 rounded-lg font-semibold text-white bg-emerald-600 hover:bg-emerald-500">Check in</button>}
+              {tool.status !== 'maintenance' && (
+                <button onClick={() => onMaint(tool)} className="w-full py-3 rounded-lg font-semibold text-amber-700 bg-white border border-amber-300 flex items-center justify-center gap-2">
+                  <Wrench size={16} /> Send to maintenance
+                </button>
+              )}
+              {tool.status === 'maintenance' && <button onClick={() => onReturn(tool)} className="w-full py-3 rounded-lg font-semibold text-white bg-emerald-600 hover:bg-emerald-500">Return to service (Available)</button>}
+            </div>
+          )}
+
+          {mode === 'out' && (
+            <div className="card p-4 space-y-3">
+              <div className="font-condensed text-lg font-bold">Check out to…</div>
+              <label className="block text-[13px] font-semibold text-ink-500">Technician
+                <select value={tech} onChange={(e) => setTech(e.target.value)} className="input mt-1 font-normal">
+                  {TECHS.filter((t) => t.id !== 't5').map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+                </select>
+              </label>
+              <label className="block text-[13px] font-semibold text-ink-500">Job site
+                <select value={site} onChange={(e) => setSite(e.target.value)} className="input mt-1 font-normal">
+                  {SITES.map((s) => <option key={s} value={s}>{s}</option>)}
+                </select>
+              </label>
+              <label className="block text-[13px] font-semibold text-ink-500">Note (optional)
+                <input value={note} onChange={(e) => setNote(e.target.value)} placeholder="e.g. needs charged battery" className="input mt-1 font-normal" />
+              </label>
+              <div className="flex gap-2 pt-1">
+                <button onClick={() => setMode(null)} className="btn-secondary flex-1">Cancel</button>
+                <button onClick={() => onCheckout(tool, { tech, site, note })} className="btn-primary flex-[2]">Confirm check out</button>
+              </div>
+            </div>
+          )}
+
+          {mode === 'in' && (
+            <div className="card p-4 space-y-3">
+              <div className="font-condensed text-lg font-bold">Check in</div>
+              <div>
+                <div className="text-[13px] font-semibold text-ink-500 mb-1.5">Condition on return</div>
+                <div className="grid grid-cols-3 gap-2">
+                  {['Good', 'Needs attention', 'Damaged'].map((c) => (
+                    <button key={c} onClick={() => setCond(c)}
+                      className={`py-2 rounded-lg text-[12.5px] font-semibold border ${cond === c ? 'bg-ink-900 text-white border-ink-900' : 'bg-white text-ink-500 border-ink-200'}`}>{c}</button>
+                  ))}
+                </div>
+              </div>
+              <div>
+                <div className="text-[13px] font-semibold text-ink-500 mb-1.5">Photo on return (optional)</div>
+                <div className="flex items-center gap-3">
+                  <label className="inline-flex items-center gap-2 bg-white border border-ink-200 rounded-lg px-3 py-2.5 text-ink-700 cursor-pointer">
+                    <Camera size={18} className="text-ink-400" /> {photo ? 'Retake' : 'Take photo'}
+                    <input type="file" accept="image/*" capture="environment" onChange={pickPhoto} className="hidden" />
+                  </label>
+                  {photo && <img src={photo} alt="return condition" className="w-12 h-12 rounded-lg object-cover border border-ink-200" />}
+                </div>
+              </div>
+              <label className="block text-[13px] font-semibold text-ink-500">Note (optional)
+                <input value={note} onChange={(e) => setNote(e.target.value)} placeholder="e.g. chuck sticking" className="input mt-1 font-normal" />
+              </label>
+              <div className="flex gap-2 pt-1">
+                <button onClick={() => setMode(null)} className="btn-secondary flex-1">Cancel</button>
+                <button onClick={() => onCheckin(tool, { cond, note, photo })} className="flex-[2] py-3 rounded-lg font-semibold text-white bg-emerald-600 hover:bg-emerald-500">Confirm check in</button>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+/* ---------------------------------------------------------------- Tag modal */
+function TagModal({ tool, onClose }) {
+  const canvasRef = useRef(null)
+  useEffect(() => {
+    if (canvasRef.current) {
+      QRCode.toCanvas(canvasRef.current, tool.assetId, {
+        errorCorrectionLevel: 'H', width: 150, margin: 1,
+        color: { dark: '#0F1923', light: '#ffffff' },
+      }).catch(() => {})
+    }
+  }, [tool])
+
+  return (
+    <div className="fixed inset-0 z-50 bg-ink-950/70 grid place-items-center p-5" onClick={onClose}>
+      <style>{`@media print{body *{visibility:hidden!important}#tc-print,#tc-print *{visibility:visible!important}#tc-print{position:fixed;inset:0;margin:auto}@page{size:2.2in 1.1in;margin:0}}`}</style>
+      <div className="bg-white rounded-2xl w-full max-w-sm overflow-hidden" onClick={(e) => e.stopPropagation()}>
+        <div className="px-5 py-4 flex items-center justify-between border-b border-ink-100">
+          <h3 className="font-condensed text-xl font-bold">Asset tag</h3>
+          <button className="text-ink-400" onClick={onClose}><X size={24} /></button>
+        </div>
+        <div className="p-6 grid place-items-center">
+          <div id="tc-print" className="rounded-lg p-3 flex items-center gap-3"
+            style={{ background: 'linear-gradient(135deg,#E8EAEC,#C9CDD2)', border: '1px solid #AEB4BB', width: 300 }}>
+            <div className="bg-white p-1.5 rounded"><canvas ref={canvasRef} /></div>
+            <div className="min-w-0">
+              <div className="font-mono text-[10px] text-ink-500 font-bold tracking-wide">PYRAMID · PROPERTY OF</div>
+              <div className="font-mono text-2xl font-bold text-ink-900 leading-tight">{tool.assetId}</div>
+              <div className="font-condensed text-[15px] font-semibold text-ink-700 truncate">{tool.name}</div>
+              <div className="text-[10px] text-ink-500 truncate">{tool.manufacturer} {tool.model}</div>
+            </div>
+          </div>
+          <p className="text-[12px] text-ink-400 mt-4 text-center">
+            QR error correction <span className="font-mono font-bold text-ink-700">H · 30%</span> — still scans when scratched. Reprint anytime; the code never changes.
+          </p>
+        </div>
+        <div className="px-5 pb-5">
+          <button onClick={() => window.print()} className="w-full bg-ink-900 text-white rounded-xl py-3.5 font-semibold flex items-center justify-center gap-2">
+            <Printer size={18} /> Print tag
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}

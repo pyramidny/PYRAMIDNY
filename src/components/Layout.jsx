@@ -2,7 +2,8 @@ import { useState, useEffect } from 'react'
 import { Outlet, useLocation, useNavigate, Link } from 'react-router-dom'
 import {
   Bell, Settings, Users, LogOut,
-  LayoutDashboard, ClipboardList, HardHat, Anchor, ScanLine
+  LayoutDashboard, ClipboardList, HardHat, Anchor, ScanLine,
+  LayoutGrid, Plus
 } from 'lucide-react'
 import { Sidebar } from './Sidebar'
 import { supabase } from '@/lib/supabase'
@@ -40,6 +41,19 @@ export function Layout() {
   )?.[1] ?? 'Pyramid Portal'
 
   const division = new URLSearchParams(location.search).get('division')
+
+  // Tool Control gets its own mobile bottom bar (the "device menu" swap).
+  // Desktop sidebar is intentionally left unchanged.
+  const onTools = location.pathname.startsWith('/tools')
+  const toolTab = new URLSearchParams(location.search).get('tab') || 'scan'
+  const canManageTools = isAdmin || profile?.role === 'tool_manager'
+  const TOOL_TABS = [
+    { key: 'dashboard', to: '/dashboard',        label: 'Dashboard', icon: LayoutDashboard, back: true },
+    { key: 'scan',      to: '/tools?tab=scan',     label: 'Scan',      icon: ScanLine },
+    { key: 'tools',     to: '/tools?tab=tools',    label: 'Tools',     icon: LayoutGrid },
+    { key: 'activity',  to: '/tools?tab=activity', label: 'Activity',  icon: ClipboardList },
+    ...(canManageTools ? [{ key: 'enroll', to: '/tools?tab=enroll', label: 'Add', icon: Plus }] : []),
+  ]
 
   // Close the top menu whenever we navigate.
   useEffect(() => { setMenuOpen(false) }, [location.pathname, location.search])
@@ -134,23 +148,45 @@ export function Layout() {
           <Outlet />
         </main>
 
-        {/* Bottom tab bar — mobile only */}
-        <nav className="lg:hidden fixed bottom-0 inset-x-0 z-30 bg-white border-t border-ink-200 grid grid-cols-5 pb-[env(safe-area-inset-bottom)]">
-          {TABS.map(tab => {
-            const active = tab.match(location.pathname, division)
-            return (
-              <Link
-                key={tab.label}
-                to={tab.to}
-                className={`flex flex-col items-center justify-center gap-1 py-2 text-[11px] font-medium transition-colors
-                  ${active ? 'text-ink-900' : 'text-ink-400'}`}
-              >
-                <tab.icon size={22} className={active ? 'text-pyramid-500' : ''} />
-                {tab.label}
-              </Link>
-            )
-          })}
-        </nav>
+        {/* Bottom tab bar — mobile only. Tool Control swaps in its own menu. */}
+        {onTools ? (
+          <nav
+            className="lg:hidden fixed bottom-0 inset-x-0 z-30 bg-white border-t border-ink-200 grid pb-[env(safe-area-inset-bottom)]"
+            style={{ gridTemplateColumns: `repeat(${TOOL_TABS.length}, minmax(0, 1fr))` }}
+          >
+            {TOOL_TABS.map(tab => {
+              const active = !tab.back && toolTab === tab.key
+              return (
+                <Link
+                  key={tab.key}
+                  to={tab.to}
+                  className={`flex flex-col items-center justify-center gap-1 py-2 text-[11px] font-medium transition-colors
+                    ${active ? 'text-ink-900' : 'text-ink-400'}`}
+                >
+                  <tab.icon size={22} className={active ? 'text-pyramid-500' : ''} />
+                  {tab.label}
+                </Link>
+              )
+            })}
+          </nav>
+        ) : (
+          <nav className="lg:hidden fixed bottom-0 inset-x-0 z-30 bg-white border-t border-ink-200 grid grid-cols-5 pb-[env(safe-area-inset-bottom)]">
+            {TABS.map(tab => {
+              const active = tab.match(location.pathname, division)
+              return (
+                <Link
+                  key={tab.label}
+                  to={tab.to}
+                  className={`flex flex-col items-center justify-center gap-1 py-2 text-[11px] font-medium transition-colors
+                    ${active ? 'text-ink-900' : 'text-ink-400'}`}
+                >
+                  <tab.icon size={22} className={active ? 'text-pyramid-500' : ''} />
+                  {tab.label}
+                </Link>
+              )
+            })}
+          </nav>
+        )}
       </div>
     </div>
   )
