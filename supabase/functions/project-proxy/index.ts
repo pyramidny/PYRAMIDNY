@@ -388,6 +388,10 @@ serve(async (req) => {
     // ------------------------------------------------------------------------
     if (action === "update") {
       if (!projectId) return json({ error: "projectId required" }, 400);
+      const caller = await lookupCallerProfile(userId, payload);
+      if (!caller || caller.role !== "admin") {
+        return json({ error: "Admin only" }, 403);
+      }
       const { data, error } = await supabase.from("projects")
         .update({ ...updates, updated_at: new Date().toISOString() })
         .eq("id", projectId).select().single();

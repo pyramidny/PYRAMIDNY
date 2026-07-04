@@ -160,6 +160,8 @@ export default function ProjectDetail() {
   const [staffPool, setStaffPool] = useState([])
   const [editingTeam, setEditingTeam] = useState(false)
   const [teamDraft, setTeamDraft] = useState({ pm_id: null, assistant_pm_id: null })
+  const [editingDates, setEditingDates] = useState(false)
+  const [dateDraft, setDateDraft] = useState({ due_date: '', start_date: '', reminder_date: '' })
 
   // Milestone inline edit state: { [milestoneId]: { value, milestone_date, notes } }
   const [msDraft, setMsDraft] = useState({})
@@ -258,6 +260,21 @@ export default function ProjectDetail() {
       await proxy({ action: 'update_project', id, ...teamDraft })
       setProject(p => ({ ...p, ...teamDraft }))
       setEditingTeam(false)
+    } catch (e) {
+      alert('Failed to save: ' + e.message)
+    }
+  }
+
+  const saveDates = async () => {
+    try {
+      const updates = {
+        due_date:      dateDraft.due_date || null,
+        start_date:    dateDraft.start_date || null,
+        reminder_date: dateDraft.reminder_date || null,
+      }
+      await proxy({ action: 'update', projectId: id, updates })
+      setProject(p => ({ ...p, ...updates }))
+      setEditingDates(false)
     } catch (e) {
       alert('Failed to save: ' + e.message)
     }
@@ -468,9 +485,63 @@ export default function ProjectDetail() {
             <p className="text-xs text-gray-400 uppercase tracking-wide mb-1">Created</p>
             <p className="text-sm font-medium text-gray-900">{fmtLongDate(project.created_at)}</p>
           </div>
-          <div className="bg-white rounded-lg border border-gray-200 p-4">
-            <p className="text-xs text-gray-400 uppercase tracking-wide mb-1">Due Date</p>
-            <p className="text-sm font-medium text-gray-900">{fmtLongDate(project.due_date)}</p>
+          <div className="sm:col-span-2 bg-white rounded-lg border border-gray-200 p-4">
+            <div className="flex items-center justify-between mb-3">
+              <p className="text-xs text-gray-400 uppercase tracking-wide">Timeline</p>
+              {!editingDates ? (
+                canDo('update_project_fields') && (
+                  <button
+                    onClick={() => {
+                      setDateDraft({
+                        due_date: project.due_date ?? '',
+                        start_date: project.start_date ?? '',
+                        reminder_date: project.reminder_date ?? '',
+                      })
+                      setEditingDates(true)
+                    }}
+                    className="text-xs text-blue-600 hover:text-blue-800"
+                  >
+                    Edit
+                  </button>
+                )
+              ) : (
+                <div className="flex gap-2">
+                  <button onClick={saveDates} className="text-xs text-green-600 hover:text-green-800">Save</button>
+                  <button onClick={() => setEditingDates(false)} className="text-xs text-gray-400 hover:text-gray-600">Cancel</button>
+                </div>
+              )}
+            </div>
+            {!editingDates ? (
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div>
+                  <p className="text-xs text-gray-400">Due Date</p>
+                  <p className="text-sm font-medium text-gray-900">{fmtLongDate(project.due_date)}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-gray-400">Start Date</p>
+                  <p className="text-sm font-medium text-gray-900">{fmtLongDate(project.start_date)}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-gray-400">Reminder</p>
+                  <p className="text-sm font-medium text-gray-900">{fmtLongDate(project.reminder_date)}</p>
+                </div>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div>
+                  <label className="text-xs text-gray-400 block mb-1">Due Date</label>
+                  <input type="date" value={dateDraft.due_date || ''} onChange={(e) => setDateDraft((d) => ({ ...d, due_date: e.target.value }))} className="w-full border border-gray-200 rounded px-2 py-1 text-sm text-gray-900" />
+                </div>
+                <div>
+                  <label className="text-xs text-gray-400 block mb-1">Start Date</label>
+                  <input type="date" value={dateDraft.start_date || ''} onChange={(e) => setDateDraft((d) => ({ ...d, start_date: e.target.value }))} className="w-full border border-gray-200 rounded px-2 py-1 text-sm text-gray-900" />
+                </div>
+                <div>
+                  <label className="text-xs text-gray-400 block mb-1">Reminder</label>
+                  <input type="date" value={dateDraft.reminder_date || ''} onChange={(e) => setDateDraft((d) => ({ ...d, reminder_date: e.target.value }))} className="w-full border border-gray-200 rounded px-2 py-1 text-sm text-gray-900" />
+                </div>
+              </div>
+            )}
           </div>
           {project.notes && (
             <div className="sm:col-span-2 bg-white rounded-lg border border-gray-200 p-4">
