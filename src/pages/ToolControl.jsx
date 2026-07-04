@@ -121,6 +121,7 @@ export default function ToolControl() {
   const [techs, setTechs] = useState([])
   const [jobs, setJobs] = useState([])
   const [loading, setLoading] = useState(true)
+  const [loadErr, setLoadErr] = useState(null)
   const [openId, setOpenId] = useState(null)
   const [sheetMode, setSheetMode] = useState(null)
   const [tagId, setTagId] = useState(null)
@@ -153,12 +154,15 @@ export default function ToolControl() {
 
   /* ---- data load ---- */
   const reload = useCallback(async () => {
-    const [toolsRes, txRes, profRes, projRes] = await Promise.all([
+    const withTimeout = (pr, ms = 12000) => Promise.race([
+      pr, new Promise((_, rej) => setTimeout(() => rej(new Error('Timed out loading tools. Tap Retry.')), ms)),
+    ])
+    const [toolsRes, txRes, profRes, projRes] = await withTimeout(Promise.all([
       supabase.from('tools').select('*').order('asset_id', { ascending: true }),
       supabase.from('tool_transactions').select('*').order('created_at', { ascending: false }).limit(300),
       supabase.from('profiles').select('id, full_name, display_name, is_active').eq('is_active', true),
       supabase.from('projects').select('id, project_number, project_address').order('project_number', { ascending: true }),
-    ])
+    ]))
     if (toolsRes.error) throw toolsRes.error
 
     const profRows = profRes.data ?? []
@@ -199,14 +203,12 @@ export default function ToolControl() {
     })))
   }, [])
 
-  useEffect(() => {
-    let alive = true
-    ;(async () => {
-      try { await reload() } catch (e) { if (alive) flash(e.message || 'Failed to load tools') }
-      finally { if (alive) setLoading(false) }
-    })()
-    return () => { alive = false }
+  const loadTools = useCallback(async () => {
+    setLoading(true); setLoadErr(null)
+    try { await reload() } catch (e) { setLoadErr(e.message || 'Failed to load tools') }
+    finally { setLoading(false) }
   }, [reload])
+  useEffect(() => { loadTools() }, [loadTools])
 
   const counts = useMemo(() => ({
     out: tools.filter((t) => t.status === 'out').length,
@@ -259,12 +261,15 @@ export default function ToolControl() {
       const created = await proxy({
         action: 'enroll_tool',
         tool: {
-          asset_id: nextId, name: data.name, manufacturer: data.manufacturer,
+          name: data.name, manufacturer: data.manufacturer,
           model: data.model, serial: data.serial, category: data.category,
-          replacement_value: Number(data.value) || 0,
+          // strip $ and commas so "$650" saves as 650, not NaN -> 0
+          replacement_value: Number(String(data.value ?? '').replace(/[^0-9.]/g, '')) || 0,
         },
       })
-      await reload(); setTab('tools'); setTagId(created?.asset_id ?? nextId); flash(`${nextId} enrolled`)
+      const newId = created?.asset_id
+      setTab('tools'); if (newId) setTagId(newId); flash(`${newId ?? 'Tool'} enrolled`)
+      reload().catch(() => {})   // refresh list in the background; never blocks the tag
     } catch (e) { flash(e.message) }
   }
   function resolve(code) {
@@ -316,6 +321,11 @@ export default function ToolControl() {
       <div className="max-w-5xl mx-auto px-6 py-6">
         {loading ? (
           <div className="text-center text-ink-400 py-20">Loading tools…</div>
+        ) : loadErr ? (
+          <div className="text-center py-20">
+            <div className="text-ink-500 mb-3">{loadErr}</div>
+            <button onClick={loadTools} className="btn-primary">Retry</button>
+          </div>
         ) : (
           <>
             {tab === 'scan' && <ScanTab tools={tools} onResolve={resolve} />}
@@ -542,7 +552,7 @@ function EnrollTab({ nextId, onEnroll }) {
             {['Power tool', 'Equipment', 'Instrument', 'Hand tool'].map((c) => <option key={c}>{c}</option>)}
           </select>
         </label>
-        <button disabled={!ready} onClick={async () => { setBusy(true); await onEnroll({ ...f, value: Number(f.value) || 0 }); setBusy(false) }}
+        <button disabled={!ready} onClick={async () => { setBusy(true); await onEnroll({ ...f }); setBusy(false) }}
           className="btn-primary w-full disabled:opacity-50">{busy ? 'Enrolling…' : 'Enroll & print tag'}</button>
       </div>
     </div>
@@ -685,26 +695,49 @@ function ToolSheet({ tool, mode, setMode, techs, jobs, onClose, onCheckout, onCh
 
 /* ---------------------------------------------------------------- Tag modal */
 function TagModal({ tool, onClose }) {
-  const canvasRef = useRef(null)
+  const canvasRef = useRef(null)       // on-screen preview
+  const printRef = useRef(null)        // hidden print label
   useEffect(() => {
-    if (canvasRef.current) {
-      QRCode.toCanvas(canvasRef.current, tool.assetId, {
-        errorCorrectionLevel: 'H', width: 150, margin: 1,
-        color: { dark: '#0F1923', light: '#ffffff' },
-      }).catch(() => {})
-    }
+    const opts = { errorCorrectionLevel: 'H', width: 150, margin: 1 }
+    if (canvasRef.current) QRCode.toCanvas(canvasRef.current, tool.assetId, { ...opts, color: { dark: '#0F1923', light: '#ffffff' } }).catch(() => {})
+    if (printRef.current) QRCode.toCanvas(printRef.current, tool.assetId, { ...opts, color: { dark: '#000000', light: '#ffffff' } }).catch(() => {})
   }, [tool])
 
   return (
     <div className="fixed inset-0 z-50 bg-ink-950/70 grid place-items-center p-5" onClick={onClose}>
-      <style>{`@media print{body *{visibility:hidden!important}#tc-print,#tc-print *{visibility:visible!important}#tc-print{position:fixed;inset:0;margin:auto}@page{size:2.2in 1.1in;margin:0}}`}</style>
+      <style>{`@media print{
+        body *{visibility:hidden!important}
+        #tc-print,#tc-print *{visibility:visible!important}
+        #tc-print{position:fixed!important;left:50%!important;top:50%!important;transform:translate(-50%,-50%)!important}
+        .tcp-card{display:flex;align-items:center;gap:0.12in;width:2.2in;height:1.1in;box-sizing:border-box;padding:0.08in;background:#fff}
+        .tcp-qr canvas{width:0.9in!important;height:0.9in!important;display:block}
+        .tcp-txt{font-family:Arial,sans-serif;line-height:1.08;overflow:hidden}
+        .tcp-h{font-size:5pt;font-weight:700;letter-spacing:0.4pt;color:#333}
+        .tcp-id{font-size:13pt;font-weight:800;color:#000;font-family:monospace;line-height:1}
+        .tcp-name{font-size:7pt;font-weight:600;color:#222;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:1.05in}
+        .tcp-sub{font-size:5.5pt;color:#555;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:1.05in}
+        @page{margin:0}
+      }`}</style>
+      {/* Hidden print-only label — sized in inches so it prints clean on a normal
+          Letter printer (centered) and fills a 2.2x1.1 Godex label. */}
+      <div id="tc-print" aria-hidden="true" style={{ position: 'absolute', left: '-9999px', top: 0 }}>
+        <div className="tcp-card">
+          <div className="tcp-qr"><canvas ref={printRef} /></div>
+          <div className="tcp-txt">
+            <div className="tcp-h">PYRAMID · PROPERTY OF</div>
+            <div className="tcp-id">{tool.assetId}</div>
+            <div className="tcp-name">{tool.name}</div>
+            <div className="tcp-sub">{tool.manufacturer} {tool.model}</div>
+          </div>
+        </div>
+      </div>
       <div className="bg-white rounded-2xl w-full max-w-sm overflow-hidden" onClick={(e) => e.stopPropagation()}>
         <div className="px-5 py-4 flex items-center justify-between border-b border-ink-100">
           <h3 className="font-condensed text-xl font-bold">Asset tag</h3>
           <button className="text-ink-400" onClick={onClose}><X size={24} /></button>
         </div>
         <div className="p-6 grid place-items-center">
-          <div id="tc-print" className="rounded-lg p-3 flex items-center gap-3"
+          <div className="rounded-lg p-3 flex items-center gap-3"
             style={{ background: 'linear-gradient(135deg,#E8EAEC,#C9CDD2)', border: '1px solid #AEB4BB', width: 300 }}>
             <div className="bg-white p-1.5 rounded"><canvas ref={canvasRef} /></div>
             <div className="min-w-0">

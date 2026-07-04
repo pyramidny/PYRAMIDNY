@@ -904,13 +904,33 @@ serve(async (req) => {
         return json({ error: "Not authorized to enroll tools" }, 403);
       }
       const t = body.tool ?? {};
-      if (!t.asset_id || !t.name || !t.serial) {
-        return json({ error: "asset_id, name, serial required" }, 400);
+      if (!t.name || !t.serial) {
+        return json({ error: "name and serial required" }, 400);
       }
-      const { data: tool, error: insErr } = await supabase.from("tools")
-        .insert({ ...t, status: "available", created_by: caller.id })
-        .select().single();
-      if (insErr) return json({ error: insErr.message }, 400);
+
+      // Asset ID is generated HERE (server-side), never trusted from the client —
+      // two devices generating client-side both produced PYR-0001 and collided.
+      // Derive the next number from the current max PYR-#### and, on a unique
+      // clash from a concurrent enroll, bump and retry.
+      const { data: idRows } = await supabase.from("tools")
+        .select("asset_id").ilike("asset_id", "PYR-%");
+      let maxN = 0;
+      for (const r of idRows ?? []) {
+        const n = parseInt(String(r.asset_id).replace(/^PYR-/i, ""), 10);
+        if (!isNaN(n) && n > maxN) maxN = n;
+      }
+
+      let tool = null, lastErr = null;
+      for (let attempt = 1; attempt <= 5; attempt++) {
+        const assetId = "PYR-" + String(maxN + attempt).padStart(4, "0");
+        const { data, error } = await supabase.from("tools")
+          .insert({ ...t, asset_id: assetId, status: "available", created_by: caller.id })
+          .select().single();
+        if (!error) { tool = data; break; }
+        if (error.code === "23505") { lastErr = error; continue; } // unique clash -> retry
+        return json({ error: error.message }, 400);
+      }
+      if (!tool) return json({ error: lastErr?.message ?? "Could not allocate an asset ID" }, 409);
 
       await supabase.from("tool_transactions").insert({
         tool_id: tool.id, action: "enrolled",
