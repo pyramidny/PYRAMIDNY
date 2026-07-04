@@ -18,6 +18,11 @@ import { Link, useLocation } from 'react-router-dom'
 const DONE_STATUSES = ['completed', 'skipped', 'na']
 const ADMIN_TASK_CAP = 100  // safety cap on the org-wide rollup fetch
 
+function fmtShort(ts) {
+  if (!ts) return null
+  return new Date(ts).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+}
+
 const STATUS_STYLES = {
   'New Bid':         'bg-ink-100 text-ink-600',
   'Active Bid':      'bg-blue-50 text-blue-700',
@@ -49,13 +54,40 @@ export function Dashboard() {
       // ── Projects (rows power both the stat cards and the two panes) ─────
       let query = supabase
         .from('projects')
-        .select('id, project_number, project_address, status, current_stage, division')
+        .select('id, project_number, project_address, status, current_stage, division, created_at')
         .order('created_at', { ascending: false })
       if (division) query = query.eq('division', division)
       const { data: projects, error: projectsError } = await query
 
       if (projectsError) console.error('Projects query error:', projectsError)
-      setRows(projects ?? [])
+
+      // Newest activity per project → "last worked on" date + who
+      const rows = projects ?? []
+      const ids = rows.map(p => p.id)
+      if (ids.length) {
+        const { data: acts } = await supabase
+          .from('project_activity')
+          .select('project_id, author_id, created_at')
+          .in('project_id', ids)
+          .order('created_at', { ascending: false })
+        const lastByProject = {}
+        for (const a of (acts ?? [])) {
+          if (!lastByProject[a.project_id]) lastByProject[a.project_id] = a
+        }
+        const authorIds = [...new Set(Object.values(lastByProject).map(a => a.author_id).filter(Boolean))]
+        const names = {}
+        if (authorIds.length) {
+          const { data: profs } = await supabase
+            .from('profiles').select('id, full_name, display_name').in('id', authorIds)
+          for (const p of (profs ?? [])) names[p.id] = p.display_name || p.full_name
+        }
+        for (const p of rows) {
+          const a = lastByProject[p.id]
+          p.last_activity_at = a?.created_at ?? null
+          p.last_activity_who = a?.author_id ? (names[a.author_id] ?? null) : null
+        }
+      }
+      setRows(rows)
 
       // ── My open tasks ──────────────────────────────────────────────────
       // Use profile.id from AuthContext — supabase.auth.getUser() returns
@@ -360,6 +392,10 @@ function ProjectPane({ title, icon, accent, prefixClass, projects, loading, divi
               </span>
               <div className="flex-1 min-w-0">
                 <p className="text-sm font-medium text-ink-800 truncate">{p.project_address}</p>
+                <p className="text-[10px] text-ink-400 truncate">
+                  {p.created_at ? 'Created ' + fmtShort(p.created_at) : ''}
+                  {p.last_activity_at ? ' · Updated ' + fmtShort(p.last_activity_at) + (p.last_activity_who ? ' · ' + p.last_activity_who : '') : ''}
+                </p>
               </div>
               <div className="flex flex-col items-end gap-1 flex-shrink-0">
                 <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${STATUS_STYLES[p.status] ?? 'bg-ink-100 text-ink-500'}`}>

@@ -123,6 +123,22 @@ function deriveProjectFolderUrl(docs = []) {
   return null
 }
 
+// Activity feed display helpers
+function activityDot(type) {
+  return type === 'task_complete' ? '#10b981'
+       : type === 'stage_advance' ? '#E65100'
+       : '#9ca3af'
+}
+function fmtActivityDate(ts) {
+  const d = new Date(ts)
+  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) +
+         ' · ' + d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })
+}
+function fmtLongDate(ts) {
+  if (!ts) return '-'
+  return new Date(ts).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+}
+
 export default function ProjectDetail() {
   const { id } = useParams()
   const navigate = useNavigate()
@@ -133,6 +149,7 @@ export default function ProjectDetail() {
   const [milestones, setMilestones] = useState([])
   const [tasks, setTasks] = useState([])
   const [documents, setDocuments] = useState([])
+  const [activity, setActivity] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
   const [activeTab, setActiveTab] = useState('overview')
@@ -212,6 +229,15 @@ export default function ProjectDetail() {
           .order('uploaded_at', { ascending: false })
         if (de) throw de
         setDocuments(docs ?? [])
+
+        // Activity feed (non-blocking — never fail the page over it)
+        const { data: acts, error: ae } = await supabase
+          .from('project_activity')
+          .select('id, activity_type, body, author_id, created_at')
+          .eq('project_id', id)
+          .order('created_at', { ascending: false })
+          .limit(25)
+        if (!ae) setActivity(acts ?? [])
       } catch (e) {
         setError(e.message)
       } finally {
@@ -438,6 +464,14 @@ export default function ProjectDetail() {
             <p className="text-xs text-gray-400 uppercase tracking-wide mb-1">Project Number</p>
             <p className="text-sm font-medium text-gray-900">{project.project_number ?? '-'}</p>
           </div>
+          <div className="bg-white rounded-lg border border-gray-200 p-4">
+            <p className="text-xs text-gray-400 uppercase tracking-wide mb-1">Created</p>
+            <p className="text-sm font-medium text-gray-900">{fmtLongDate(project.created_at)}</p>
+          </div>
+          <div className="bg-white rounded-lg border border-gray-200 p-4">
+            <p className="text-xs text-gray-400 uppercase tracking-wide mb-1">Due Date</p>
+            <p className="text-sm font-medium text-gray-900">{fmtLongDate(project.due_date)}</p>
+          </div>
           {project.notes && (
             <div className="sm:col-span-2 bg-white rounded-lg border border-gray-200 p-4">
               <p className="text-xs text-gray-400 uppercase tracking-wide mb-1">Notes</p>
@@ -501,6 +535,27 @@ export default function ProjectDetail() {
                     {staffPool.map((s) => <option key={s.id} value={s.id}>{s.full_name}</option>)}
                   </select>
                 </div>
+              </div>
+            )}
+          </div>
+          <div className="sm:col-span-2 bg-white rounded-lg border border-gray-200 p-4">
+            <p className="text-xs text-gray-400 uppercase tracking-wide mb-3">Activity</p>
+            {activity.length === 0 ? (
+              <p className="text-sm text-gray-400">No activity yet.</p>
+            ) : (
+              <div className="space-y-3">
+                {activity.map((a) => {
+                  const who = staffPool.find((s) => s.id === a.author_id)?.full_name
+                  return (
+                    <div key={a.id} className="flex gap-3">
+                      <span className="mt-1.5 w-2 h-2 rounded-full flex-shrink-0" style={{ background: activityDot(a.activity_type) }} />
+                      <div className="min-w-0">
+                        <p className="text-sm text-gray-800">{a.body}</p>
+                        <p className="text-xs text-gray-400">{who ? who + ' · ' : ''}{fmtActivityDate(a.created_at)}</p>
+                      </div>
+                    </div>
+                  )
+                })}
               </div>
             )}
           </div>
