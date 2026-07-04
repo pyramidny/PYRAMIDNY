@@ -162,6 +162,9 @@ export function ProjectList() {
                 <th className="text-left px-4 py-3 text-xs font-semibold text-ink-500 uppercase tracking-wider w-28 hidden lg:table-cell">
                   Stage
                 </th>
+                <th className="text-left px-4 py-3 text-xs font-semibold text-ink-500 uppercase tracking-wider w-28 hidden lg:table-cell">
+                  Due
+                </th>
                 <th className="text-left px-4 py-3 text-xs font-semibold text-ink-500 uppercase tracking-wider w-32 hidden lg:table-cell">
                   PM
                 </th>
@@ -239,6 +242,13 @@ function ProjectRow({ project }) {
             {STAGE_LABELS[project.current_stage]}
           </span>
         </div>
+      </td>
+
+      {/* Due */}
+      <td className="px-4 py-3.5 hidden lg:table-cell text-ink-500 text-xs">
+        {project.due_date
+          ? new Date(project.due_date + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+          : <span className="text-ink-300">—</span>}
       </td>
 
       {/* PM */}

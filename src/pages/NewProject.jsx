@@ -52,6 +52,7 @@ const EMPTY = {
   property_manager_owner: '',
   architect_engineer:     '',
   bid_amount:             '',
+  due_date:               '',
   notes:                  '',
 }
 
@@ -206,6 +207,7 @@ export default function NewProject() {
             property_manager_owner: form.property_manager_owner.trim() || null,
             architect_engineer:     form.architect_engineer.trim() || null,
             bid_amount:             form.bid_amount ? Number(form.bid_amount) : null,
+            due_date:               form.due_date || null,
             notes:                  form.notes.trim() || null,
           },
         }),
@@ -375,6 +377,18 @@ export default function NewProject() {
                 </div>
                 <FieldError msg={errors.bid_amount} />
                 <p className="mt-1.5 text-xs text-stone-600">Leave blank if not yet determined.</p>
+              </div>
+            </Section>
+
+            <Section number="4" title="Timeline">
+              <div className="max-w-xs">
+                <Label>Due Date</Label>
+                <Input
+                  type="date"
+                  value={form.due_date}
+                  onChange={set('due_date')}
+                />
+                <p className="mt-1.5 text-xs text-stone-600">Bid or project due date. Optional.</p>
               </div>
             </Section>
 
