@@ -886,6 +886,176 @@ serve(async (req) => {
     }
 
     // ------------------------------------------------------------------------
+
+    // ========================================================================
+    // TOOL CONTROL ACTIONS  (Phase B)
+    // Catalog = public.tools ; append-only ledger = public.tool_transactions.
+    // Denormalized current_* on tools is kept in sync on every state change.
+    // enroll / update / retire  -> admin || tool_manager
+    // checkout / checkin / maintenance -> any active profile (tighten later).
+    // Reads are direct from the frontend via RLS SELECT — not proxied here.
+    // ========================================================================
+
+    // ENROLL a new tool ------------------------------------------------------
+    if (action === "enroll_tool") {
+      const caller = await lookupCallerProfile(userId, payload);
+      if (!caller || !caller.is_active) return json({ error: "No active profile" }, 403);
+      if (!["admin", "tool_manager"].includes(caller.role)) {
+        return json({ error: "Not authorized to enroll tools" }, 403);
+      }
+      const t = body.tool ?? {};
+      if (!t.asset_id || !t.name || !t.serial) {
+        return json({ error: "asset_id, name, serial required" }, 400);
+      }
+      const { data: tool, error: insErr } = await supabase.from("tools")
+        .insert({ ...t, status: "available", created_by: caller.id })
+        .select().single();
+      if (insErr) return json({ error: insErr.message }, 400);
+
+      await supabase.from("tool_transactions").insert({
+        tool_id: tool.id, action: "enrolled",
+        profile_id: caller.id, created_by: caller.id, note: body.note ?? null,
+      });
+      return json({ data: tool });
+    }
+
+    // CHECK OUT a tool to a tech + job ---------------------------------------
+    if (action === "checkout_tool") {
+      const caller = await lookupCallerProfile(userId, payload);
+      if (!caller || !caller.is_active) return json({ error: "No active profile" }, 403);
+      const { toolId, profileId, expectedReturnDate, note } = body;
+      const jobId = body.jobProjectId ?? null;
+      if (!toolId || !profileId) return json({ error: "toolId and profileId required" }, 400);
+
+      await supabase.from("tool_transactions").insert({
+        tool_id: toolId, action: "out",
+        profile_id: profileId, project_id: jobId,
+        expected_return_date: expectedReturnDate ?? null,
+        note: note ?? null, created_by: caller.id,
+      });
+      const { data: tool, error } = await supabase.from("tools")
+        .update({
+          status: "out", current_holder_id: profileId,
+          current_project_id: jobId, updated_at: new Date().toISOString(),
+        })
+        .eq("id", toolId).select().single();
+      if (error) return json({ error: error.message }, 400);
+      return json({ data: tool });
+    }
+
+    // CHECK IN a tool (optional condition photo -> SharePoint Tools/{asset}/) -
+    if (action === "checkin_tool") {
+      const caller = await lookupCallerProfile(userId, payload);
+      if (!caller || !caller.is_active) return json({ error: "No active profile" }, 403);
+      const { toolId, condition, note, photoFileName, photoContent, toMaintenance } = body;
+      if (!toolId) return json({ error: "toolId required" }, 400);
+
+      const { data: existing, error: te } = await supabase.from("tools")
+        .select("id, asset_id").eq("id", toolId).single();
+      if (te || !existing) return json({ error: "tool not found" }, 404);
+
+      // Optional condition photo. Graph path-upload auto-creates Tools/{asset}/.
+      let photoUrl: string | null = null;
+      if (photoContent && photoFileName) {
+        if (!providerToken) return json({ error: "providerToken required for photo upload" }, 400);
+        const safeName = String(photoFileName).replace(/[<>:"/\\|?*\x00-\x1f]/g, "_");
+        const safeAsset = String(existing.asset_id).replace(/[<>:"/\\|?*\x00-\x1f]/g, "_");
+        const uploadUrl = `${GRAPH_BASE}/sites/${SP_SITE_ID}/drive/root:/Tools/${safeAsset}/${safeName}:/content`;
+        const bytes = Uint8Array.from(atob(photoContent), (c) => c.charCodeAt(0));
+        const up = await fetch(uploadUrl, {
+          method: "PUT",
+          headers: { Authorization: `Bearer ${providerToken}`, "Content-Type": "application/octet-stream" },
+          body: bytes,
+        });
+        if (!up.ok) {
+          const err = await up.json().catch(() => ({}));
+          return json({ error: `Photo upload failed: ${err?.error?.message ?? up.status}` }, 500);
+        }
+        const item = await up.json();
+        photoUrl = item.webUrl ?? null;
+      }
+
+      await supabase.from("tool_transactions").insert({
+        tool_id: toolId, action: "in",
+        profile_id: caller.id, condition: condition ?? null,
+        photo_url: photoUrl, note: note ?? null, created_by: caller.id,
+      });
+      const { data: tool, error } = await supabase.from("tools")
+        .update({
+          status: toMaintenance ? "maintenance" : "available",
+          current_holder_id: null, current_project_id: null,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", toolId).select().single();
+      if (error) return json({ error: error.message }, 400);
+      return json({ data: tool, meta: { photo_url: photoUrl } });
+    }
+
+    // MAINTENANCE toggle (send to / return from) -----------------------------
+    if (action === "tool_maintenance") {
+      const caller = await lookupCallerProfile(userId, payload);
+      if (!caller || !caller.is_active) return json({ error: "No active profile" }, 403);
+      const { toolId, condition, note, back } = body;
+      if (!toolId) return json({ error: "toolId required" }, 400);
+
+      await supabase.from("tool_transactions").insert({
+        tool_id: toolId, action: "maintenance",
+        profile_id: caller.id, condition: condition ?? null,
+        note: note ?? null, created_by: caller.id,
+      });
+      const { data: tool, error } = await supabase.from("tools")
+        .update({ status: back ? "available" : "maintenance", updated_at: new Date().toISOString() })
+        .eq("id", toolId).select().single();
+      if (error) return json({ error: error.message }, 400);
+      return json({ data: tool });
+    }
+
+    // RETIRE a tool (admin || tool_manager) ----------------------------------
+    if (action === "retire_tool") {
+      const caller = await lookupCallerProfile(userId, payload);
+      if (!caller || !caller.is_active) return json({ error: "No active profile" }, 403);
+      if (!["admin", "tool_manager"].includes(caller.role)) {
+        return json({ error: "Not authorized to retire tools" }, 403);
+      }
+      const { toolId, note } = body;
+      if (!toolId) return json({ error: "toolId required" }, 400);
+
+      await supabase.from("tool_transactions").insert({
+        tool_id: toolId, action: "retired",
+        profile_id: caller.id, note: note ?? null, created_by: caller.id,
+      });
+      const { data: tool, error } = await supabase.from("tools")
+        .update({
+          status: "retired", current_holder_id: null,
+          current_project_id: null, updated_at: new Date().toISOString(),
+        })
+        .eq("id", toolId).select().single();
+      if (error) return json({ error: error.message }, 400);
+      return json({ data: tool });
+    }
+
+    // UPDATE catalog fields (admin || tool_manager) — never touches state ----
+    if (action === "update_tool") {
+      const caller = await lookupCallerProfile(userId, payload);
+      if (!caller || !caller.is_active) return json({ error: "No active profile" }, 403);
+      if (!["admin", "tool_manager"].includes(caller.role)) {
+        return json({ error: "Not authorized to edit tools" }, 403);
+      }
+      const toolId = body.toolId || id;
+      if (!toolId) return json({ error: "toolId required" }, 400);
+      // Strip state columns — those move only via checkout/checkin/maintenance/retire.
+      const clean: Record<string, unknown> = { ...(updates ?? {}) };
+      delete clean.status; delete clean.current_holder_id;
+      delete clean.current_project_id; delete clean.id;
+      delete clean.created_by; delete clean.created_at;
+      const { data: tool, error } = await supabase.from("tools")
+        .update({ ...clean, updated_at: new Date().toISOString() })
+        .eq("id", toolId).select().single();
+      if (error) return json({ error: error.message }, 400);
+      return json({ data: tool });
+    }
+
+
     // SELECT PROJECTS
     // ------------------------------------------------------------------------
     if (action === "select") {

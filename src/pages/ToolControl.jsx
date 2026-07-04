@@ -1,11 +1,15 @@
 // src/pages/ToolControl.jsx
-// Route: /tools  —  Phase A: in-memory demo data (no Supabase yet).
+// Route: /tools  —  Phase B: wired to Supabase.
+//   Reads  : direct authenticated selects (RLS) on tools / tool_transactions
+//            + profiles (techs) + projects (jobs).
+//   Writes : project-proxy tool actions (enroll / checkout / checkin /
+//            maintenance / retire), Azure-AD token from localStorage.
 // Internal tabs are driven by ?tab= so the mobile bottom bar (Layout.jsx)
 // and the desktop top-tab strip share the same state.
 // Access: everyone can scan / view. Enrolling tools is gated to
-// isAdmin || profile.role === 'tool_manager'  (real role lands in Phase B).
+//   isAdmin || profile.role === 'tool_manager'.
 
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import {
   ScanLine, LayoutGrid, ClipboardList, Plus, Printer, Wrench,
@@ -14,50 +18,28 @@ import {
 import QRCode from 'qrcode'
 import { Html5Qrcode } from 'html5-qrcode'
 import { useAuth } from '@/context/AuthContext'
+import { supabase } from '@/lib/supabase'
 
-/* ---------------------------------------------------------------- demo data */
+/* ---------------------------------------------------------------- config */
 const DAY = 86400000
-const now = Date.now()
-
-const TECHS = [
-  { id: 't1', name: 'Marcus Rivera', initials: 'MR' },
-  { id: 't2', name: 'Danny Cho', initials: 'DC' },
-  { id: 't3', name: 'Sofia Almeida', initials: 'SA' },
-  { id: 't4', name: 'Will Pruitt', initials: 'WP' },
-  { id: 't5', name: 'Tool Crib (return)', initials: 'TC' },
-]
-const SITES = [
-  'Yonkers — 3rd Ave', 'New Rochelle — Main St', 'White Plains — Court St',
-  'Stamford — Harbor Point', 'Tool Crib',
-]
-const mk = (o) => ({ category: 'Power tool', notes: '', photo: null, condition: 'Good', ...o })
-
-const SEED_TOOLS = [
-  mk({ assetId: 'PYR-0001', name: 'Hammer Drill', manufacturer: 'Milwaukee', model: '2904-20 M18 FUEL', serial: 'MWK2904-44871', value: 329, status: 'out', holder: 't1', jobSite: 'Yonkers — 3rd Ave', lastActionAt: now - 5.2 * DAY }),
-  mk({ assetId: 'PYR-0002', name: 'Rotary Hammer', manufacturer: 'Bosch', model: 'RH328VC', serial: 'BSH328-99120', value: 449, status: 'out', holder: 't2', jobSite: 'New Rochelle — Main St', lastActionAt: now - 0.4 * DAY }),
-  mk({ assetId: 'PYR-0003', name: 'Reciprocating Saw', manufacturer: 'DeWalt', model: 'DCS389 FLEXVOLT', serial: 'DWT389-21044', value: 299, status: 'available', holder: null, jobSite: 'Tool Crib', lastActionAt: now - 2.1 * DAY }),
-  mk({ assetId: 'PYR-0004', name: 'Angle Grinder', manufacturer: 'Makita', model: 'GA5070', serial: 'MKT5070-58823', value: 159, status: 'available', holder: null, jobSite: 'Tool Crib', lastActionAt: now - 9 * DAY }),
-  mk({ assetId: 'PYR-0005', name: 'Demolition Hammer', manufacturer: 'Hilti', model: 'TE 1000-AVR', serial: 'HLT1000-30277', value: 1899, status: 'maintenance', holder: null, jobSite: 'Tool Crib', lastActionAt: now - 1.3 * DAY, notes: 'Carbon brushes worn — sent to service center.', condition: 'Needs attention' }),
-  mk({ assetId: 'PYR-0006', name: 'Impact Driver', manufacturer: 'Milwaukee', model: '2853-20 M18', serial: 'MWK2853-71190', value: 179, status: 'available', holder: null, jobSite: 'Tool Crib', lastActionAt: now - 4 * DAY }),
-  mk({ assetId: 'PYR-0007', name: 'Wet/Dry Vacuum', manufacturer: 'Ridgid', model: 'WD1450', serial: 'RDG1450-66002', value: 139, status: 'out', holder: 't3', jobSite: 'Stamford — Harbor Point', lastActionAt: now - 1.9 * DAY }),
-  mk({ assetId: 'PYR-0008', name: 'Generator 3500W', manufacturer: 'Honda', model: 'EU3000iS', serial: 'HND3000-40551', value: 2199, status: 'available', holder: null, jobSite: 'Tool Crib', lastActionAt: now - 12 * DAY, category: 'Equipment' }),
-  mk({ assetId: 'PYR-0009', name: 'Rotary Laser Level', manufacturer: 'Bosch', model: 'GRL4000', serial: 'BSH4000-18834', value: 629, status: 'available', holder: null, jobSite: 'Tool Crib', lastActionAt: now - 6 * DAY, category: 'Instrument' }),
-  mk({ assetId: 'PYR-0010', name: 'Circular Saw', manufacturer: 'DeWalt', model: 'DCS570 ATOMIC', serial: 'DWT570-90123', value: 189, status: 'out', holder: 't4', jobSite: 'White Plains — Court St', lastActionAt: now - 6.7 * DAY }),
-]
-const SEED_ACTIVITY = [
-  { id: 'a1', ts: now - 5.2 * DAY, assetId: 'PYR-0001', toolName: 'Hammer Drill', action: 'out', techId: 't1', jobSite: 'Yonkers — 3rd Ave', condition: null, note: '' },
-  { id: 'a2', ts: now - 6.7 * DAY, assetId: 'PYR-0010', toolName: 'Circular Saw', action: 'out', techId: 't4', jobSite: 'White Plains — Court St', condition: null, note: '' },
-  { id: 'a3', ts: now - 2.1 * DAY, assetId: 'PYR-0003', toolName: 'Reciprocating Saw', action: 'in', techId: 't5', jobSite: 'Tool Crib', condition: 'Good', note: 'Blade replaced.' },
-  { id: 'a4', ts: now - 1.9 * DAY, assetId: 'PYR-0007', toolName: 'Wet/Dry Vacuum', action: 'out', techId: 't3', jobSite: 'Stamford — Harbor Point', condition: null, note: '' },
-  { id: 'a5', ts: now - 1.3 * DAY, assetId: 'PYR-0005', toolName: 'Demolition Hammer', action: 'maintenance', techId: 't5', jobSite: 'Tool Crib', condition: 'Needs attention', note: 'Carbon brushes worn.' },
-  { id: 'a6', ts: now - 0.4 * DAY, assetId: 'PYR-0002', toolName: 'Rotary Hammer', action: 'out', techId: 't2', jobSite: 'New Rochelle — Main St', condition: null, note: '' },
-]
 const OVERDUE_DAYS = 3
+const PROXY_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/project-proxy`
+const SP_TOKEN_KEY = 'sb-izjaxmcdlsdkdliqjlei-auth-token'
 
 /* ---------------------------------------------------------------- helpers */
-const tName = (id) => TECHS.find((t) => t.id === id)?.name ?? '—'
-const tInit = (id) => TECHS.find((t) => t.id === id)?.initials ?? '—'
-const isOverdue = (t) => t.status === 'out' && Date.now() - t.lastActionAt > OVERDUE_DAYS * DAY
+// Runtime tech index (profile id -> {name, initials}), filled on each load so
+// the presentational atoms below can stay id-based without prop drilling.
+let TECH_INDEX = {}
+const initialsOf = (name) =>
+  (name || '').trim().split(/\s+/).map((w) => w[0]).slice(0, 2).join('').toUpperCase() || '—'
+const tName = (id) => TECH_INDEX[id]?.name ?? '—'
+const tInit = (id) => TECH_INDEX[id]?.initials ?? '—'
+
+const isOverdue = (t) => {
+  if (t.status !== 'out') return false
+  if (t.expectedReturnDate) return Date.now() > Date.parse(t.expectedReturnDate + 'T23:59:59')
+  return Date.now() - t.lastActionAt > OVERDUE_DAYS * DAY
+}
 const money = (n) => '$' + Number(n || 0).toLocaleString()
 function ago(ts) {
   const s = (Date.now() - ts) / 1000
@@ -71,12 +53,37 @@ const STATUS = {
   available: { label: 'Available', cls: 'bg-emerald-100 text-emerald-700' },
   out: { label: 'Checked out', cls: 'bg-pyramid-50 text-pyramid-600' },
   maintenance: { label: 'Maintenance', cls: 'bg-amber-100 text-amber-700' },
+  retired: { label: 'Retired', cls: 'bg-ink-200 text-ink-600' },
 }
-const dotColor = (st) => (st === 'available' ? 'bg-emerald-500' : st === 'out' ? 'bg-pyramid-500' : 'bg-amber-500')
+const dotColor = (st) =>
+  st === 'available' ? 'bg-emerald-500' : st === 'out' ? 'bg-pyramid-500'
+    : st === 'retired' ? 'bg-ink-400' : 'bg-amber-500'
+
+// Adapt a DB tools row (+ lookups) into the shape the render expects.
+function adaptTool(row, projLabel, lastCond, lastPhoto, outInfo) {
+  return {
+    id: row.id,
+    assetId: row.asset_id,
+    name: row.name,
+    manufacturer: row.manufacturer ?? '',
+    model: row.model ?? '',
+    serial: row.serial ?? '',
+    value: row.replacement_value ?? 0,
+    category: row.category ?? '—',
+    notes: row.notes ?? '',
+    status: row.status,
+    holder: row.current_holder_id ?? null,
+    jobSite: row.current_project_id ? (projLabel[row.current_project_id] ?? 'Job') : 'Tool Crib',
+    lastActionAt: Date.parse(row.updated_at),
+    condition: lastCond ?? 'Good',
+    photo: lastPhoto ?? null,
+    expectedReturnDate: outInfo?.expectedReturnDate ?? null,
+  }
+}
 
 /* ---------------------------------------------------------------- atoms */
 function Pill({ tool }) {
-  const s = STATUS[tool.status]
+  const s = STATUS[tool.status] ?? STATUS.available
   return (
     <span className="inline-flex items-center gap-1.5">
       <span className={`px-2 py-0.5 rounded-full text-[11px] font-semibold ${s.cls}`}>{s.label}</span>
@@ -109,8 +116,11 @@ export default function ToolControl() {
   if (tab === 'enroll' && !canManage) tab = 'scan'
   const setTab = (t) => setParams({ tab: t }, { replace: true })
 
-  const [tools, setTools] = useState(SEED_TOOLS)
-  const [activity, setActivity] = useState(SEED_ACTIVITY)
+  const [tools, setTools] = useState([])
+  const [activity, setActivity] = useState([])
+  const [techs, setTechs] = useState([])
+  const [jobs, setJobs] = useState([])
+  const [loading, setLoading] = useState(true)
   const [openId, setOpenId] = useState(null)
   const [sheetMode, setSheetMode] = useState(null)
   const [tagId, setTagId] = useState(null)
@@ -119,9 +129,84 @@ export default function ToolControl() {
   const openTool = tools.find((t) => t.assetId === openId) || null
   const tagTool = tools.find((t) => t.assetId === tagId) || null
 
-  function flash(msg) { setToast(msg); clearTimeout(flash._t); flash._t = setTimeout(() => setToast(null), 2200) }
-  function patch(id, obj) { setTools((ts) => ts.map((t) => (t.assetId === id ? { ...t, ...obj } : t))) }
-  function log(e) { setActivity((a) => [{ id: 'a' + Date.now(), ts: Date.now(), ...e }, ...a]) }
+  function flash(msg) { setToast(msg); clearTimeout(flash._t); flash._t = setTimeout(() => setToast(null), 2600) }
+
+  // Azure-AD access token for proxy writes (session.access_token is null for MS JWTs).
+  const getAccessToken = useCallback(() => {
+    try { const raw = localStorage.getItem(SP_TOKEN_KEY); return raw ? JSON.parse(raw)?.access_token : null }
+    catch { return null }
+  }, [])
+  const getProviderToken = useCallback(() => {
+    try { const raw = localStorage.getItem(SP_TOKEN_KEY); return raw ? JSON.parse(raw)?.provider_token : null }
+    catch { return null }
+  }, [])
+  const proxy = useCallback(async (body) => {
+    const res = await fetch(PROXY_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getAccessToken()}` },
+      body: JSON.stringify(body),
+    })
+    const json = await res.json()
+    if (!res.ok) throw new Error(json.error ?? `Proxy error ${res.status}`)
+    return json.data
+  }, [getAccessToken])
+
+  /* ---- data load ---- */
+  const reload = useCallback(async () => {
+    const [toolsRes, txRes, profRes, projRes] = await Promise.all([
+      supabase.from('tools').select('*').order('asset_id', { ascending: true }),
+      supabase.from('tool_transactions').select('*').order('created_at', { ascending: false }).limit(300),
+      supabase.from('profiles').select('id, full_name, display_name, is_active').eq('is_active', true),
+      supabase.from('projects').select('id, project_number, project_address').order('project_number', { ascending: true }),
+    ])
+    if (toolsRes.error) throw toolsRes.error
+
+    const profRows = profRes.data ?? []
+    TECH_INDEX = Object.fromEntries(profRows.map((p) => {
+      const name = p.display_name || p.full_name || '—'
+      return [p.id, { name, initials: initialsOf(name) }]
+    }))
+    setTechs(profRows.map((p) => ({ id: p.id, name: p.display_name || p.full_name || '—' })))
+
+    const projRows = projRes.data ?? []
+    const projLabel = Object.fromEntries(projRows.map((p) => [p.id, `${p.project_number} — ${p.project_address ?? ''}`.trim()]))
+    setJobs(projRows.map((p) => ({ id: p.id, label: `${p.project_number} — ${p.project_address ?? ''}`.trim() })))
+
+    // Derive per-tool last condition / photo / latest-out info from the ledger.
+    const txRows = txRes.data ?? []
+    const lastCond = {}, lastPhoto = {}, outInfo = {}
+    for (const tx of txRows) { // already newest-first
+      if (tx.condition && !(tx.tool_id in lastCond)) lastCond[tx.tool_id] = tx.condition
+      if (tx.photo_url && !(tx.tool_id in lastPhoto)) lastPhoto[tx.tool_id] = tx.photo_url
+      if (tx.action === 'out' && !(tx.tool_id in outInfo)) outInfo[tx.tool_id] = { expectedReturnDate: tx.expected_return_date ?? null }
+    }
+
+    const toolRows = toolsRes.data ?? []
+    const nameById = Object.fromEntries(toolRows.map((r) => [r.id, r.name]))
+    const assetById = Object.fromEntries(toolRows.map((r) => [r.id, r.asset_id]))
+
+    setTools(toolRows.map((r) => adaptTool(r, projLabel, lastCond[r.id], lastPhoto[r.id], outInfo[r.id])))
+    setActivity(txRows.map((tx) => ({
+      id: tx.id,
+      ts: Date.parse(tx.created_at),
+      assetId: assetById[tx.tool_id] ?? '—',
+      toolName: nameById[tx.tool_id] ?? 'Tool',
+      action: tx.action,
+      techId: tx.profile_id,
+      jobSite: tx.project_id ? (projLabel[tx.project_id] ?? 'Job') : 'Tool Crib',
+      condition: tx.condition,
+      note: tx.note ?? '',
+    })))
+  }, [])
+
+  useEffect(() => {
+    let alive = true
+    ;(async () => {
+      try { await reload() } catch (e) { if (alive) flash(e.message || 'Failed to load tools') }
+      finally { if (alive) setLoading(false) }
+    })()
+    return () => { alive = false }
+  }, [reload])
 
   const counts = useMemo(() => ({
     out: tools.filter((t) => t.status === 'out').length,
@@ -138,32 +223,49 @@ export default function ToolControl() {
     return 'PYR-' + String(n).padStart(4, '0')
   }, [tools])
 
-  /* actions */
-  function checkout(t, { tech, site, note }) {
-    patch(t.assetId, { status: 'out', holder: tech, jobSite: site, lastActionAt: Date.now(), notes: note || t.notes })
-    log({ assetId: t.assetId, toolName: t.name, action: 'out', techId: tech, jobSite: site, condition: null, note })
-    setOpenId(null); setSheetMode(null); flash(`${t.name} checked out to ${tName(tech)}`)
+  /* ---- actions (proxy → reload) ---- */
+  async function checkout(t, { tech, job, note, expectedReturnDate }) {
+    try {
+      await proxy({ action: 'checkout_tool', toolId: t.id, profileId: tech, jobProjectId: job || null, expectedReturnDate: expectedReturnDate || null, note })
+      await reload(); setOpenId(null); setSheetMode(null); flash(`${t.name} checked out to ${tName(tech)}`)
+    } catch (e) { flash(e.message) }
   }
-  function checkin(t, { cond, note, photo }) {
-    patch(t.assetId, { status: 'available', holder: null, jobSite: 'Tool Crib', lastActionAt: Date.now(), condition: cond, notes: note || '', photo: photo || t.photo })
-    log({ assetId: t.assetId, toolName: t.name, action: 'in', techId: 't5', jobSite: 'Tool Crib', condition: cond, note })
-    setOpenId(null); setSheetMode(null); flash(`${t.name} checked in · ${cond}`)
+  async function checkin(t, { cond, note, photo }) {
+    try {
+      let photoFileName = null, photoContent = null, providerToken = null
+      if (photo) {
+        photoContent = String(photo).split(',')[1] || null   // strip data: URL prefix
+        photoFileName = `${t.assetId}-${Date.now()}.jpg`
+        providerToken = getProviderToken()
+      }
+      await proxy({ action: 'checkin_tool', toolId: t.id, condition: cond, note, photoFileName, photoContent, providerToken, toMaintenance: cond === 'Damaged' })
+      await reload(); setOpenId(null); setSheetMode(null); flash(`${t.name} checked in · ${cond}`)
+    } catch (e) { flash(e.message) }
   }
-  function maint(t) {
-    patch(t.assetId, { status: 'maintenance', holder: null, jobSite: 'Tool Crib', lastActionAt: Date.now() })
-    log({ assetId: t.assetId, toolName: t.name, action: 'maintenance', techId: 't5', jobSite: 'Tool Crib', condition: 'Needs attention', note: '' })
-    setOpenId(null); setSheetMode(null); flash(`${t.name} sent to maintenance`)
+  async function maint(t) {
+    try {
+      await proxy({ action: 'tool_maintenance', toolId: t.id, condition: 'Needs attention' })
+      await reload(); setOpenId(null); setSheetMode(null); flash(`${t.name} sent to maintenance`)
+    } catch (e) { flash(e.message) }
   }
-  function returnService(t) {
-    patch(t.assetId, { status: 'available', holder: null, jobSite: 'Tool Crib', lastActionAt: Date.now(), condition: 'Good' })
-    log({ assetId: t.assetId, toolName: t.name, action: 'in', techId: 't5', jobSite: 'Tool Crib', condition: 'Good', note: 'Returned from service.' })
-    setOpenId(null); flash(`${t.name} returned to service`)
+  async function returnService(t) {
+    try {
+      await proxy({ action: 'tool_maintenance', toolId: t.id, back: true, condition: 'Good', note: 'Returned from service.' })
+      await reload(); setOpenId(null); flash(`${t.name} returned to service`)
+    } catch (e) { flash(e.message) }
   }
-  function enroll(data) {
-    const t = mk({ assetId: nextId, ...data, status: 'available', holder: null, jobSite: 'Tool Crib', lastActionAt: Date.now() })
-    setTools((ts) => [t, ...ts])
-    log({ assetId: t.assetId, toolName: t.name, action: 'enrolled', techId: 't5', jobSite: 'Tool Crib', condition: 'Good', note: '' })
-    setTab('tools'); setTagId(t.assetId); flash(`${t.assetId} enrolled`)
+  async function enroll(data) {
+    try {
+      const created = await proxy({
+        action: 'enroll_tool',
+        tool: {
+          asset_id: nextId, name: data.name, manufacturer: data.manufacturer,
+          model: data.model, serial: data.serial, category: data.category,
+          replacement_value: Number(data.value) || 0,
+        },
+      })
+      await reload(); setTab('tools'); setTagId(created?.asset_id ?? nextId); flash(`${nextId} enrolled`)
+    } catch (e) { flash(e.message) }
   }
   function resolve(code) {
     const hit = tools.find((t) => t.assetId.toLowerCase() === String(code).trim().toLowerCase())
@@ -212,15 +314,22 @@ export default function ToolControl() {
 
       {/* Body */}
       <div className="max-w-5xl mx-auto px-6 py-6">
-        {tab === 'scan' && <ScanTab tools={tools} onResolve={resolve} />}
-        {tab === 'tools' && <ToolsTab tools={tools} onOpen={(id) => { setOpenId(id); setSheetMode(null) }} />}
-        {tab === 'activity' && <ActivityTab activity={activity} />}
-        {tab === 'enroll' && canManage && <EnrollTab nextId={nextId} onEnroll={enroll} />}
+        {loading ? (
+          <div className="text-center text-ink-400 py-20">Loading tools…</div>
+        ) : (
+          <>
+            {tab === 'scan' && <ScanTab tools={tools} onResolve={resolve} />}
+            {tab === 'tools' && <ToolsTab tools={tools} onOpen={(id) => { setOpenId(id); setSheetMode(null) }} />}
+            {tab === 'activity' && <ActivityTab activity={activity} />}
+            {tab === 'enroll' && canManage && <EnrollTab nextId={nextId} onEnroll={enroll} />}
+          </>
+        )}
       </div>
 
       {openTool && (
         <ToolSheet
           tool={openTool} mode={sheetMode} setMode={setSheetMode}
+          techs={techs} jobs={jobs}
           onClose={() => { setOpenId(null); setSheetMode(null) }}
           onCheckout={checkout} onCheckin={checkin} onMaint={maint}
           onReturn={returnService} onPrint={() => setTagId(openTool.assetId)}
@@ -289,7 +398,7 @@ function ScanTab({ tools, onResolve }) {
 
       {camState === 'error' && (
         <div className="bg-amber-50 text-amber-700 text-[13px] rounded-xl px-4 py-3 mb-3">
-          Camera needs a secure (HTTPS) connection and permission. Use the demo tags or manual entry below.
+          Camera needs a secure (HTTPS) connection and permission. Use the tags below or manual entry.
         </div>
       )}
 
@@ -372,6 +481,7 @@ function ActivityTab({ activity }) {
   const META = {
     out: ['text-pyramid-600', 'Checked out'], in: ['text-emerald-600', 'Checked in'],
     maintenance: ['text-amber-600', 'To maintenance'], enrolled: ['text-ink-700', 'Enrolled'],
+    retired: ['text-ink-500', 'Retired'],
   }
   return (
     <div className="max-w-2xl">
@@ -406,8 +516,9 @@ function ActivityTab({ activity }) {
 /* ---------------------------------------------------------------- Enroll tab */
 function EnrollTab({ nextId, onEnroll }) {
   const [f, setF] = useState({ name: '', manufacturer: '', model: '', serial: '', value: '', category: 'Power tool' })
+  const [busy, setBusy] = useState(false)
   const set = (k) => (e) => setF((s) => ({ ...s, [k]: e.target.value }))
-  const ready = f.name.trim() && f.serial.trim()
+  const ready = f.name.trim() && f.serial.trim() && !busy
   const fields = [
     ['name', 'Tool name', 'e.g. Hammer Drill'], ['manufacturer', 'Manufacturer', 'e.g. Milwaukee'],
     ['model', 'Model', 'e.g. 2904-20'], ['serial', 'Serial number', 'from the nameplate'],
@@ -431,25 +542,28 @@ function EnrollTab({ nextId, onEnroll }) {
             {['Power tool', 'Equipment', 'Instrument', 'Hand tool'].map((c) => <option key={c}>{c}</option>)}
           </select>
         </label>
-        <button disabled={!ready} onClick={() => onEnroll({ ...f, value: Number(f.value) || 0 })}
-          className="btn-primary w-full disabled:opacity-50">Enroll &amp; print tag</button>
+        <button disabled={!ready} onClick={async () => { setBusy(true); await onEnroll({ ...f, value: Number(f.value) || 0 }); setBusy(false) }}
+          className="btn-primary w-full disabled:opacity-50">{busy ? 'Enrolling…' : 'Enroll & print tag'}</button>
       </div>
     </div>
   )
 }
 
 /* ---------------------------------------------------------------- Tool sheet */
-function ToolSheet({ tool, mode, setMode, onClose, onCheckout, onCheckin, onMaint, onReturn, onPrint }) {
-  const [tech, setTech] = useState('t1')
-  const [site, setSite] = useState(SITES[0])
+function ToolSheet({ tool, mode, setMode, techs, jobs, onClose, onCheckout, onCheckin, onMaint, onReturn, onPrint }) {
+  const [tech, setTech] = useState(techs[0]?.id ?? '')
+  const [job, setJob] = useState('')
+  const [exp, setExp] = useState('')
   const [note, setNote] = useState('')
   const [cond, setCond] = useState('Good')
   const [photo, setPhoto] = useState(null)
+  const [busy, setBusy] = useState(false)
 
   function pickPhoto(e) {
     const file = e.target.files?.[0]; if (!file) return
     const r = new FileReader(); r.onload = () => setPhoto(r.result); r.readAsDataURL(file)
   }
+  const run = (fn) => async () => { setBusy(true); await fn(); setBusy(false) }
 
   return (
     <div className="fixed inset-0 z-40 bg-ink-950/60 flex items-end sm:items-center sm:justify-center" onClick={onClose}>
@@ -494,12 +608,12 @@ function ToolSheet({ tool, mode, setMode, onClose, onCheckout, onCheckin, onMain
             <div className="space-y-2.5">
               {tool.status === 'available' && <button onClick={() => setMode('out')} className="btn-primary w-full">Check out</button>}
               {tool.status === 'out' && <button onClick={() => setMode('in')} className="w-full py-3 rounded-lg font-semibold text-white bg-emerald-600 hover:bg-emerald-500">Check in</button>}
-              {tool.status !== 'maintenance' && (
-                <button onClick={() => onMaint(tool)} className="w-full py-3 rounded-lg font-semibold text-amber-700 bg-white border border-amber-300 flex items-center justify-center gap-2">
+              {tool.status !== 'maintenance' && tool.status !== 'retired' && (
+                <button onClick={run(() => onMaint(tool))} disabled={busy} className="w-full py-3 rounded-lg font-semibold text-amber-700 bg-white border border-amber-300 flex items-center justify-center gap-2 disabled:opacity-50">
                   <Wrench size={16} /> Send to maintenance
                 </button>
               )}
-              {tool.status === 'maintenance' && <button onClick={() => onReturn(tool)} className="w-full py-3 rounded-lg font-semibold text-white bg-emerald-600 hover:bg-emerald-500">Return to service (Available)</button>}
+              {tool.status === 'maintenance' && <button onClick={run(() => onReturn(tool))} disabled={busy} className="w-full py-3 rounded-lg font-semibold text-white bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50">Return to service (Available)</button>}
             </div>
           )}
 
@@ -508,20 +622,25 @@ function ToolSheet({ tool, mode, setMode, onClose, onCheckout, onCheckin, onMain
               <div className="font-condensed text-lg font-bold">Check out to…</div>
               <label className="block text-[13px] font-semibold text-ink-500">Technician
                 <select value={tech} onChange={(e) => setTech(e.target.value)} className="input mt-1 font-normal">
-                  {TECHS.filter((t) => t.id !== 't5').map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+                  {techs.length === 0 && <option value="">No staff found</option>}
+                  {techs.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
                 </select>
               </label>
               <label className="block text-[13px] font-semibold text-ink-500">Job site
-                <select value={site} onChange={(e) => setSite(e.target.value)} className="input mt-1 font-normal">
-                  {SITES.map((s) => <option key={s} value={s}>{s}</option>)}
+                <select value={job} onChange={(e) => setJob(e.target.value)} className="input mt-1 font-normal">
+                  <option value="">— No job / Tool Crib —</option>
+                  {jobs.map((j) => <option key={j.id} value={j.id}>{j.label}</option>)}
                 </select>
+              </label>
+              <label className="block text-[13px] font-semibold text-ink-500">Expected return (optional)
+                <input type="date" value={exp} onChange={(e) => setExp(e.target.value)} className="input mt-1 font-normal" />
               </label>
               <label className="block text-[13px] font-semibold text-ink-500">Note (optional)
                 <input value={note} onChange={(e) => setNote(e.target.value)} placeholder="e.g. needs charged battery" className="input mt-1 font-normal" />
               </label>
               <div className="flex gap-2 pt-1">
                 <button onClick={() => setMode(null)} className="btn-secondary flex-1">Cancel</button>
-                <button onClick={() => onCheckout(tool, { tech, site, note })} className="btn-primary flex-[2]">Confirm check out</button>
+                <button disabled={busy || !tech} onClick={run(() => onCheckout(tool, { tech, job, note, expectedReturnDate: exp }))} className="btn-primary flex-[2] disabled:opacity-50">{busy ? 'Saving…' : 'Confirm check out'}</button>
               </div>
             </div>
           )}
@@ -537,6 +656,7 @@ function ToolSheet({ tool, mode, setMode, onClose, onCheckout, onCheckin, onMain
                       className={`py-2 rounded-lg text-[12.5px] font-semibold border ${cond === c ? 'bg-ink-900 text-white border-ink-900' : 'bg-white text-ink-500 border-ink-200'}`}>{c}</button>
                   ))}
                 </div>
+                {cond === 'Damaged' && <div className="text-[12px] text-amber-700 mt-2">Damaged tools are routed to maintenance on check-in.</div>}
               </div>
               <div>
                 <div className="text-[13px] font-semibold text-ink-500 mb-1.5">Photo on return (optional)</div>
@@ -553,7 +673,7 @@ function ToolSheet({ tool, mode, setMode, onClose, onCheckout, onCheckin, onMain
               </label>
               <div className="flex gap-2 pt-1">
                 <button onClick={() => setMode(null)} className="btn-secondary flex-1">Cancel</button>
-                <button onClick={() => onCheckin(tool, { cond, note, photo })} className="flex-[2] py-3 rounded-lg font-semibold text-white bg-emerald-600 hover:bg-emerald-500">Confirm check in</button>
+                <button disabled={busy} onClick={run(() => onCheckin(tool, { cond, note, photo }))} className="flex-[2] py-3 rounded-lg font-semibold text-white bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50">{busy ? 'Saving…' : 'Confirm check in'}</button>
               </div>
             </div>
           )}
