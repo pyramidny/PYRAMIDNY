@@ -607,7 +607,7 @@ function ToolSheet({ tool, mode, setMode, techs, jobs, onClose, onCheckout, onCh
   const run = (fn) => async () => { setBusy(true); await fn(); setBusy(false) }
 
   return (
-    <div className="fixed inset-0 z-40 bg-ink-950/60 flex items-end sm:items-center sm:justify-center" onClick={onClose}>
+    <div className="fixed inset-0 z-40 bg-ink-950/60 flex items-end sm:items-center sm:justify-center">
       <div className="bg-ink-50 w-full sm:max-w-md rounded-t-2xl sm:rounded-2xl max-h-[92vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
         <div className="sticky top-0 bg-ink-950 text-white px-5 py-4 flex items-start justify-between">
           <div className="min-w-0">
@@ -742,7 +742,7 @@ function TagModal({ tool, onClose }) {
   }, [tool])
 
   return (
-    <div className="fixed inset-0 z-50 bg-ink-950/70 grid place-items-center p-5" onClick={onClose}>
+    <div className="fixed inset-0 z-50 bg-ink-950/70 grid place-items-center p-5">
       <style>{`@media print{
         body *{visibility:hidden!important}
         #tc-print,#tc-print *{visibility:visible!important}
