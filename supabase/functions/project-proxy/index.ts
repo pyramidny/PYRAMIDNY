@@ -896,6 +896,39 @@ serve(async (req) => {
     // Reads are direct from the frontend via RLS SELECT — not proxied here.
     // ========================================================================
 
+    // Upload up to 2 tool photos to SharePoint Tools/{asset_id}/ and return their
+    // webUrls. `photos` is an array of base64 strings (no data: prefix). Graph
+    // path-upload auto-creates the folder. Throws if photos present but no token.
+    async function uploadToolPhotos(assetId: string, actionTag: string, photos: unknown): Promise<string[]> {
+      const list = Array.isArray(photos) ? photos.slice(0, 2) : [];
+      if (list.length === 0) return [];
+      if (!providerToken) throw new Error("providerToken required for photo upload");
+      const safeAsset = String(assetId).replace(/[<>:"/\\|?*\x00-\x1f]/g, "_");
+      const ts = Date.now();
+      const urls: string[] = [];
+      let i = 0;
+      for (const item of list) {
+        i++;
+        const content = typeof item === "string" ? item : (item as { content?: string })?.content;
+        if (!content) continue;
+        const fname = `${safeAsset}-${actionTag}-${i}-${ts}.jpg`;
+        const url = `${GRAPH_BASE}/sites/${SP_SITE_ID}/drive/root:/Tools/${safeAsset}/${fname}:/content`;
+        const bytes = Uint8Array.from(atob(content), (c) => c.charCodeAt(0));
+        const up = await fetch(url, {
+          method: "PUT",
+          headers: { Authorization: `Bearer ${providerToken}`, "Content-Type": "application/octet-stream" },
+          body: bytes,
+        });
+        if (!up.ok) {
+          const e = await up.json().catch(() => ({}));
+          throw new Error(`Photo upload failed: ${e?.error?.message ?? up.status}`);
+        }
+        const j = await up.json();
+        if (j.webUrl) urls.push(j.webUrl);
+      }
+      return urls;
+    }
+
     // ENROLL a new tool ------------------------------------------------------
     if (action === "enroll_tool") {
       const caller = await lookupCallerProfile(userId, payload);
@@ -932,9 +965,18 @@ serve(async (req) => {
       }
       if (!tool) return json({ error: lastErr?.message ?? "Could not allocate an asset ID" }, 409);
 
+      let enrollPhotos: string[] = [];
+      try { enrollPhotos = await uploadToolPhotos(tool.asset_id, "enroll", body.photos); }
+      catch (e) { return json({ error: (e as Error).message }, 500); }
+      if (enrollPhotos.length) {
+        await supabase.from("tools").update({ photo_urls: enrollPhotos }).eq("id", tool.id);
+        tool.photo_urls = enrollPhotos;
+      }
+
       await supabase.from("tool_transactions").insert({
         tool_id: tool.id, action: "enrolled",
         profile_id: caller.id, created_by: caller.id, note: body.note ?? null,
+        photo_urls: enrollPhotos,
       });
       return json({ data: tool });
     }
@@ -947,11 +989,19 @@ serve(async (req) => {
       const jobId = body.jobProjectId ?? null;
       if (!toolId || !profileId) return json({ error: "toolId and profileId required" }, 400);
 
+      let outPhotos: string[] = [];
+      if (Array.isArray(body.photos) && body.photos.length) {
+        const { data: trow } = await supabase.from("tools").select("asset_id").eq("id", toolId).single();
+        try { outPhotos = await uploadToolPhotos(trow?.asset_id ?? toolId, "out", body.photos); }
+        catch (e) { return json({ error: (e as Error).message }, 500); }
+      }
+
       await supabase.from("tool_transactions").insert({
         tool_id: toolId, action: "out",
         profile_id: profileId, project_id: jobId,
         expected_return_date: expectedReturnDate ?? null,
         note: note ?? null, created_by: caller.id,
+        photo_urls: outPhotos,
       });
       const { data: tool, error } = await supabase.from("tools")
         .update({
@@ -974,31 +1024,19 @@ serve(async (req) => {
         .select("id, asset_id").eq("id", toolId).single();
       if (te || !existing) return json({ error: "tool not found" }, 404);
 
-      // Optional condition photo. Graph path-upload auto-creates Tools/{asset}/.
-      let photoUrl: string | null = null;
-      if (photoContent && photoFileName) {
-        if (!providerToken) return json({ error: "providerToken required for photo upload" }, 400);
-        const safeName = String(photoFileName).replace(/[<>:"/\\|?*\x00-\x1f]/g, "_");
-        const safeAsset = String(existing.asset_id).replace(/[<>:"/\\|?*\x00-\x1f]/g, "_");
-        const uploadUrl = `${GRAPH_BASE}/sites/${SP_SITE_ID}/drive/root:/Tools/${safeAsset}/${safeName}:/content`;
-        const bytes = Uint8Array.from(atob(photoContent), (c) => c.charCodeAt(0));
-        const up = await fetch(uploadUrl, {
-          method: "PUT",
-          headers: { Authorization: `Bearer ${providerToken}`, "Content-Type": "application/octet-stream" },
-          body: bytes,
-        });
-        if (!up.ok) {
-          const err = await up.json().catch(() => ({}));
-          return json({ error: `Photo upload failed: ${err?.error?.message ?? up.status}` }, 500);
-        }
-        const item = await up.json();
-        photoUrl = item.webUrl ?? null;
-      }
+      // Condition photos (up to 2). Accept the new `photos` array; fall back to
+      // the legacy single photoFileName/photoContent for older clients.
+      let inPhotos: string[] = [];
+      const legacy = (photoContent && photoFileName) ? [photoContent] : [];
+      try { inPhotos = await uploadToolPhotos(existing.asset_id, "in", (Array.isArray(body.photos) && body.photos.length) ? body.photos : legacy); }
+      catch (e) { return json({ error: (e as Error).message }, 500); }
+      const photoUrl = inPhotos[0] ?? null;
 
       await supabase.from("tool_transactions").insert({
         tool_id: toolId, action: "in",
         profile_id: caller.id, condition: condition ?? null,
-        photo_url: photoUrl, note: note ?? null, created_by: caller.id,
+        photo_url: photoUrl, photo_urls: inPhotos,
+        note: note ?? null, created_by: caller.id,
       });
       const { data: tool, error } = await supabase.from("tools")
         .update({

@@ -27,6 +27,9 @@ const PROXY_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/project-pro
 const SP_TOKEN_KEY = 'sb-izjaxmcdlsdkdliqjlei-auth-token'
 
 /* ---------------------------------------------------------------- helpers */
+const toBase64List = (photos) => (photos || []).map((d) => String(d).split(',')[1]).filter(Boolean)
+
+
 // Runtime tech index (profile id -> {name, initials}), filled on each load so
 // the presentational atoms below can stay id-based without prop drilling.
 let TECH_INDEX = {}
@@ -77,6 +80,7 @@ function adaptTool(row, projLabel, lastCond, lastPhoto, outInfo) {
     lastActionAt: Date.parse(row.updated_at),
     condition: lastCond ?? 'Good',
     photo: lastPhoto ?? null,
+    photoUrls: Array.isArray(row.photo_urls) ? row.photo_urls : [],
     expectedReturnDate: outInfo?.expectedReturnDate ?? null,
   }
 }
@@ -102,6 +106,39 @@ function Field({ label, children }) {
     <div>
       <div className="text-[10px] font-semibold tracking-widest uppercase text-ink-400 mb-0.5">{label}</div>
       <div className="text-sm text-ink-800">{children}</div>
+    </div>
+  )
+}
+
+// Up to `max` photos, captured from camera or file. Value is an array of data URLs.
+function PhotoPicker({ photos, onChange, max = 2, label = 'Photos (optional)' }) {
+  const add = (e) => {
+    const file = e.target.files?.[0]; if (!file) return
+    const r = new FileReader()
+    r.onload = () => onChange([...(photos || []), r.result].slice(0, max))
+    r.readAsDataURL(file)
+    e.target.value = ''
+  }
+  const remove = (i) => onChange((photos || []).filter((_, idx) => idx !== i))
+  const count = photos?.length || 0
+  return (
+    <div>
+      <div className="text-[13px] font-semibold text-ink-500 mb-1.5">{label} <span className="text-ink-400 font-normal">({count}/{max})</span></div>
+      <div className="flex items-center gap-2 flex-wrap">
+        {(photos || []).map((src, i) => (
+          <div key={i} className="relative">
+            <img src={src} alt={`photo ${i + 1}`} className="w-16 h-16 rounded-lg object-cover border border-ink-200" />
+            <button type="button" onClick={() => remove(i)}
+              className="absolute -top-1.5 -right-1.5 bg-ink-900 text-white rounded-full w-5 h-5 grid place-items-center text-[12px] leading-none">×</button>
+          </div>
+        ))}
+        {count < max && (
+          <label className="inline-flex items-center gap-2 bg-white border border-ink-200 rounded-lg px-3 py-2.5 text-ink-700 cursor-pointer">
+            <Camera size={18} className="text-ink-400" /> {count ? 'Add' : 'Take photo'}
+            <input type="file" accept="image/*" capture="environment" onChange={add} className="hidden" />
+          </label>
+        )}
+      </div>
     </div>
   )
 }
@@ -226,21 +263,15 @@ export default function ToolControl() {
   }, [tools])
 
   /* ---- actions (proxy → reload) ---- */
-  async function checkout(t, { tech, job, note, expectedReturnDate }) {
+  async function checkout(t, { tech, job, note, expectedReturnDate, photos }) {
     try {
-      await proxy({ action: 'checkout_tool', toolId: t.id, profileId: tech, jobProjectId: job || null, expectedReturnDate: expectedReturnDate || null, note })
+      await proxy({ action: 'checkout_tool', toolId: t.id, profileId: tech, jobProjectId: job || null, expectedReturnDate: expectedReturnDate || null, note, photos: toBase64List(photos), providerToken: getProviderToken() })
       await reload(); setOpenId(null); setSheetMode(null); flash(`${t.name} checked out to ${tName(tech)}`)
     } catch (e) { flash(e.message) }
   }
-  async function checkin(t, { cond, note, photo }) {
+  async function checkin(t, { cond, note, photos }) {
     try {
-      let photoFileName = null, photoContent = null, providerToken = null
-      if (photo) {
-        photoContent = String(photo).split(',')[1] || null   // strip data: URL prefix
-        photoFileName = `${t.assetId}-${Date.now()}.jpg`
-        providerToken = getProviderToken()
-      }
-      await proxy({ action: 'checkin_tool', toolId: t.id, condition: cond, note, photoFileName, photoContent, providerToken, toMaintenance: cond === 'Damaged' })
+      await proxy({ action: 'checkin_tool', toolId: t.id, condition: cond, note, photos: toBase64List(photos), providerToken: getProviderToken(), toMaintenance: cond === 'Damaged' })
       await reload(); setOpenId(null); setSheetMode(null); flash(`${t.name} checked in · ${cond}`)
     } catch (e) { flash(e.message) }
   }
@@ -266,6 +297,8 @@ export default function ToolControl() {
           // strip $ and commas so "$650" saves as 650, not NaN -> 0
           replacement_value: Number(String(data.value ?? '').replace(/[^0-9.]/g, '')) || 0,
         },
+        photos: toBase64List(data.photos),
+        providerToken: getProviderToken(),
       })
       const newId = created?.asset_id
       setTab('tools'); if (newId) setTagId(newId); flash(`${newId ?? 'Tool'} enrolled`)
@@ -526,6 +559,7 @@ function ActivityTab({ activity }) {
 /* ---------------------------------------------------------------- Enroll tab */
 function EnrollTab({ nextId, onEnroll }) {
   const [f, setF] = useState({ name: '', manufacturer: '', model: '', serial: '', value: '', category: 'Power tool' })
+  const [photos, setPhotos] = useState([])
   const [busy, setBusy] = useState(false)
   const set = (k) => (e) => setF((s) => ({ ...s, [k]: e.target.value }))
   const ready = f.name.trim() && f.serial.trim() && !busy
@@ -552,7 +586,8 @@ function EnrollTab({ nextId, onEnroll }) {
             {['Power tool', 'Equipment', 'Instrument', 'Hand tool'].map((c) => <option key={c}>{c}</option>)}
           </select>
         </label>
-        <button disabled={!ready} onClick={async () => { setBusy(true); await onEnroll({ ...f }); setBusy(false) }}
+        <PhotoPicker photos={photos} onChange={setPhotos} label="Tool photos" />
+        <button disabled={!ready} onClick={async () => { setBusy(true); await onEnroll({ ...f, photos }); setBusy(false) }}
           className="btn-primary w-full disabled:opacity-50">{busy ? 'Enrolling…' : 'Enroll & print tag'}</button>
       </div>
     </div>
@@ -566,13 +601,9 @@ function ToolSheet({ tool, mode, setMode, techs, jobs, onClose, onCheckout, onCh
   const [exp, setExp] = useState('')
   const [note, setNote] = useState('')
   const [cond, setCond] = useState('Good')
-  const [photo, setPhoto] = useState(null)
+  const [photos, setPhotos] = useState([])
   const [busy, setBusy] = useState(false)
 
-  function pickPhoto(e) {
-    const file = e.target.files?.[0]; if (!file) return
-    const r = new FileReader(); r.onload = () => setPhoto(r.result); r.readAsDataURL(file)
-  }
   const run = (fn) => async () => { setBusy(true); await fn(); setBusy(false) }
 
   return (
@@ -614,6 +645,21 @@ function ToolSheet({ tool, mode, setMode, techs, jobs, onClose, onCheckout, onCh
 
           {tool.notes && <div className="card p-4"><Field label="Notes">{tool.notes}</Field></div>}
 
+          {tool.photoUrls?.length > 0 && (
+            <div className="card p-4">
+              <Field label="Tool photos">
+                <div className="flex gap-2 flex-wrap mt-1">
+                  {tool.photoUrls.map((u, i) => (
+                    <a key={i} href={u} target="_blank" rel="noreferrer"
+                      className="w-16 h-16 rounded-lg border border-ink-200 bg-ink-100 grid place-items-center text-[11px] font-semibold text-ink-500 hover:border-ink-300">
+                      Photo {i + 1}
+                    </a>
+                  ))}
+                </div>
+              </Field>
+            </div>
+          )}
+
           {mode === null && (
             <div className="space-y-2.5">
               {tool.status === 'available' && <button onClick={() => setMode('out')} className="btn-primary w-full">Check out</button>}
@@ -648,9 +694,10 @@ function ToolSheet({ tool, mode, setMode, techs, jobs, onClose, onCheckout, onCh
               <label className="block text-[13px] font-semibold text-ink-500">Note (optional)
                 <input value={note} onChange={(e) => setNote(e.target.value)} placeholder="e.g. needs charged battery" className="input mt-1 font-normal" />
               </label>
+              <PhotoPicker photos={photos} onChange={setPhotos} label="Condition photos" />
               <div className="flex gap-2 pt-1">
                 <button onClick={() => setMode(null)} className="btn-secondary flex-1">Cancel</button>
-                <button disabled={busy || !tech} onClick={run(() => onCheckout(tool, { tech, job, note, expectedReturnDate: exp }))} className="btn-primary flex-[2] disabled:opacity-50">{busy ? 'Saving…' : 'Confirm check out'}</button>
+                <button disabled={busy || !tech} onClick={run(() => onCheckout(tool, { tech, job, note, expectedReturnDate: exp, photos }))} className="btn-primary flex-[2] disabled:opacity-50">{busy ? 'Saving…' : 'Confirm check out'}</button>
               </div>
             </div>
           )}
@@ -668,22 +715,13 @@ function ToolSheet({ tool, mode, setMode, techs, jobs, onClose, onCheckout, onCh
                 </div>
                 {cond === 'Damaged' && <div className="text-[12px] text-amber-700 mt-2">Damaged tools are routed to maintenance on check-in.</div>}
               </div>
-              <div>
-                <div className="text-[13px] font-semibold text-ink-500 mb-1.5">Photo on return (optional)</div>
-                <div className="flex items-center gap-3">
-                  <label className="inline-flex items-center gap-2 bg-white border border-ink-200 rounded-lg px-3 py-2.5 text-ink-700 cursor-pointer">
-                    <Camera size={18} className="text-ink-400" /> {photo ? 'Retake' : 'Take photo'}
-                    <input type="file" accept="image/*" capture="environment" onChange={pickPhoto} className="hidden" />
-                  </label>
-                  {photo && <img src={photo} alt="return condition" className="w-12 h-12 rounded-lg object-cover border border-ink-200" />}
-                </div>
-              </div>
+              <PhotoPicker photos={photos} onChange={setPhotos} label="Photos on return" />
               <label className="block text-[13px] font-semibold text-ink-500">Note (optional)
                 <input value={note} onChange={(e) => setNote(e.target.value)} placeholder="e.g. chuck sticking" className="input mt-1 font-normal" />
               </label>
               <div className="flex gap-2 pt-1">
                 <button onClick={() => setMode(null)} className="btn-secondary flex-1">Cancel</button>
-                <button disabled={busy} onClick={run(() => onCheckin(tool, { cond, note, photo }))} className="flex-[2] py-3 rounded-lg font-semibold text-white bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50">{busy ? 'Saving…' : 'Confirm check in'}</button>
+                <button disabled={busy} onClick={run(() => onCheckin(tool, { cond, note, photos }))} className="flex-[2] py-3 rounded-lg font-semibold text-white bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50">{busy ? 'Saving…' : 'Confirm check in'}</button>
               </div>
             </div>
           )}
