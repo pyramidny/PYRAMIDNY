@@ -675,7 +675,7 @@ function ToolSheet({ tool, mode, setMode, techs, jobs, onClose, onCheckout, onCh
 
           {mode === 'out' && (
             <div className="card p-4 space-y-3">
-              <div className="font-condensed text-lg font-bold">Check out to…</div>
+              <div className="font-condensed text-lg font-bold text-ink-900">Check out to…</div>
               <label className="block text-[13px] font-semibold text-ink-500">Technician
                 <select value={tech} onChange={(e) => setTech(e.target.value)} className="input mt-1 font-normal">
                   {techs.length === 0 && <option value="">No staff found</option>}
@@ -704,7 +704,7 @@ function ToolSheet({ tool, mode, setMode, techs, jobs, onClose, onCheckout, onCh
 
           {mode === 'in' && (
             <div className="card p-4 space-y-3">
-              <div className="font-condensed text-lg font-bold">Check in</div>
+              <div className="font-condensed text-lg font-bold text-ink-900">Check in</div>
               <div>
                 <div className="text-[13px] font-semibold text-ink-500 mb-1.5">Condition on return</div>
                 <div className="grid grid-cols-3 gap-2">
