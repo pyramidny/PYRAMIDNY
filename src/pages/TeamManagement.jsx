@@ -368,7 +368,7 @@ export default function TeamManagement() {
             <select
               value={editDraft.role}
               onChange={(e) => setEditDraft(d => ({ ...d, role: e.target.value }))}
-              className="text-sm border border-gray-200 rounded px-2 py-1 w-full"
+              className="text-sm border border-gray-200 rounded px-2 py-1 w-full text-gray-900 bg-white"
             >
               {ROLES.map(r => <option key={r.value} value={r.value}>{r.label}</option>)}
             </select>
@@ -385,7 +385,7 @@ export default function TeamManagement() {
             <select
               value={editDraft.division}
               onChange={(e) => setEditDraft(d => ({ ...d, division: e.target.value }))}
-              className="text-sm border border-gray-200 rounded px-2 py-1 w-full"
+              className="text-sm border border-gray-200 rounded px-2 py-1 w-full text-gray-900 bg-white"
             >
               {DIVISIONS.map(d => <option key={d.value} value={d.value}>{d.label}</option>)}
             </select>

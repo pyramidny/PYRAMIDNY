@@ -13,6 +13,15 @@
     -moz-osx-font-smoothing: grayscale;
   }
 
+  /* Guard: the body defaults to light text (dark theme). Native dropdown
+     option lists render on white in Windows Chrome, so any <select> that
+     forgets an explicit text color becomes white-on-white ("empty" menu).
+     Force readable options everywhere; each select's own classes still win. */
+  select option {
+    color: #111827;            /* gray-900 */
+    background-color: #ffffff;
+  }
+
   /* Custom scrollbar — dark theme */
   ::-webkit-scrollbar { width: 6px; height: 6px; }
   ::-webkit-scrollbar-track { @apply bg-transparent; }
