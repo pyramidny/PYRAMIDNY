@@ -6,7 +6,112 @@ const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const SP_SITE_ID = Deno.env.get("SP_SITE_ID") ?? "";
 const GRAPH_BASE = "https://graph.microsoft.com/v1.0";
 
+// App-only (client credentials) Graph auth. See getGraphToken() below.
+// Reads the existing MS_* secrets (set May 2026 for the Graph webhook work).
+// GRAPH_* names are accepted as an alias so either naming works.
+const GRAPH_TENANT_ID =
+  Deno.env.get("MS_TENANT_ID") ?? Deno.env.get("GRAPH_TENANT_ID") ?? "";
+const GRAPH_CLIENT_ID =
+  Deno.env.get("MS_CLIENT_ID") ?? Deno.env.get("GRAPH_CLIENT_ID") ?? "";
+const GRAPH_CLIENT_SECRET =
+  Deno.env.get("MS_CLIENT_SECRET") ?? Deno.env.get("GRAPH_CLIENT_SECRET") ?? "";
+
 const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
+
+// ============================================================================
+// APP-ONLY MICROSOFT GRAPH TOKEN
+// ============================================================================
+// Replaces the user's `provider_token` for every SharePoint call.
+//
+// WHY: Supabase captures the Microsoft Graph delegated token at OAuth login and
+// stores it in localStorage, but never refreshes it. Graph access tokens live
+// ~1 hour, so the entire SharePoint layer only worked for about an hour after a
+// fresh sign-in. Staff stay signed in for days, so in practice folder creation
+// silently no-op'd and uploads returned "providerToken required".
+//
+// This uses the PYRAMID COMMAND CENTER app registration (Application
+// permissions: Sites.ReadWrite.All + Files.ReadWrite.All, admin consented).
+// No user token is involved, so it works for any user at any time, and for
+// unattended jobs like the file-server migration.
+//
+// Tokens are cached in public.graph_token_cache and reused until 5 minutes
+// before expiry.
+
+let memoToken: { token: string; expiresAt: number } | null = null;
+
+async function getGraphToken(): Promise<string | null> {
+  if (!GRAPH_TENANT_ID || !GRAPH_CLIENT_ID || !GRAPH_CLIENT_SECRET) return null;
+
+  const now = Date.now();
+  const SKEW_MS = 5 * 60 * 1000; // refresh 5 min early
+
+  // 1. In-memory (survives within a warm isolate)
+  if (memoToken && memoToken.expiresAt - SKEW_MS > now) return memoToken.token;
+
+  // 2. Shared DB cache (survives cold starts and is shared across isolates)
+  try {
+    const { data } = await supabase
+      .from("graph_token_cache")
+      .select("access_token, expires_at")
+      .order("expires_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (data?.access_token && data?.expires_at) {
+      const exp = new Date(data.expires_at).getTime();
+      if (exp - SKEW_MS > now) {
+        memoToken = { token: data.access_token, expiresAt: exp };
+        return data.access_token;
+      }
+    }
+  } catch (_) {
+    // Cache read failure is not fatal — fall through and mint a fresh token.
+  }
+
+  // 3. Mint a new one
+  try {
+    const form = new URLSearchParams({
+      client_id: GRAPH_CLIENT_ID,
+      client_secret: GRAPH_CLIENT_SECRET,
+      scope: "https://graph.microsoft.com/.default",
+      grant_type: "client_credentials",
+    });
+
+    const res = await fetch(
+      `https://login.microsoftonline.com/${GRAPH_TENANT_ID}/oauth2/v2.0/token`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: form.toString(),
+      },
+    );
+
+    if (!res.ok) {
+      console.error("Graph token request failed:", res.status, await res.text());
+      return null;
+    }
+
+    const tok = await res.json();
+    if (!tok.access_token) return null;
+
+    const expiresAt = now + ((tok.expires_in ?? 3600) * 1000);
+    memoToken = { token: tok.access_token, expiresAt };
+
+    // Replace the cache row. Best effort — never block on it.
+    try {
+      await supabase.from("graph_token_cache").delete().neq("id", "00000000-0000-0000-0000-000000000000");
+      await supabase.from("graph_token_cache").insert({
+        access_token: tok.access_token,
+        expires_at: new Date(expiresAt).toISOString(),
+      });
+    } catch (_) { /* ignore */ }
+
+    return tok.access_token;
+  } catch (err) {
+    console.error("Graph token error:", err);
+    return null;
+  }
+}
 
 const cors = {
   "Access-Control-Allow-Origin": "*",
@@ -272,7 +377,57 @@ serve(async (req) => {
     if (!userId) return json({ error: "No user identity in token" }, 401);
 
     const body = await req.json();
-    const { action, project, projectId, id, updates, taskId, milestoneId, providerToken } = body;
+    const {
+      action, project, projectId, id, updates, taskId, milestoneId,
+      providerToken: callerProviderToken,
+    } = body;
+
+    // Every SharePoint call below uses `providerToken`. It now resolves to the
+    // app-only token first and only falls back to the caller's (expiring)
+    // provider_token if app-only credentials are not configured. This keeps all
+    // existing call sites unchanged while removing the 1-hour expiry failure.
+    const providerToken = (await getGraphToken()) ?? callerProviderToken ?? null;
+
+    // ------------------------------------------------------------------------
+    // HEALTH CHECK — used by New Project / New Client forms to warn up front
+    // ------------------------------------------------------------------------
+    if (action === "graph_health") {
+      // client_id is a public identifier, not a secret — returned so we can
+      // confirm which app registration is actually being used.
+      const which = {
+        client_id: GRAPH_CLIENT_ID || null,
+        tenant_id: GRAPH_TENANT_ID || null,
+        secret_present: !!GRAPH_CLIENT_SECRET,
+        site_id_present: !!SP_SITE_ID,
+      };
+      const t = await getGraphToken();
+      if (!t) {
+        return json({
+          ok: false,
+          reason: "no_token",
+          message: "Could not obtain a Microsoft Graph token. Check MS_TENANT_ID / MS_CLIENT_ID / MS_CLIENT_SECRET.",
+          ...which,
+        });
+      }
+      try {
+        const probe = await fetch(`${GRAPH_BASE}/sites/${SP_SITE_ID}/drive/root`, {
+          headers: { Authorization: `Bearer ${t}` },
+        });
+        if (!probe.ok) {
+          return json({
+            ok: false,
+            reason: "graph_error",
+            status: probe.status,
+            detail: (await probe.text()).slice(0, 400),
+            message: "Graph token is valid but the SharePoint drive is unreachable.",
+            ...which,
+          });
+        }
+        return json({ ok: true, mode: "app_only", ...which });
+      } catch (err) {
+        return json({ ok: false, reason: "network", message: String(err), ...which });
+      }
+    }
 
     // ------------------------------------------------------------------------
     // INSERT PROJECT
@@ -298,13 +453,33 @@ serve(async (req) => {
       await supabase.from("project_production")
         .insert({ project_id: newProject.id, pm_id: newProject.pm_id ?? null });
 
+      // ---- SharePoint provisioning -----------------------------------------
+      // The project row is already committed at this point. The DB is
+      // authoritative: if SharePoint fails we do NOT roll back the project, we
+      // report it. `sharepoint_folder_id IS NULL` is the signal that a project
+      // still needs folders, and the `backfill_project` action re-runs this.
+      //
+      // Previously this was a bare `if (providerToken) { ... }` with no else,
+      // so a missing/expired token silently produced a folderless project that
+      // only surfaced later as an upload error.
       let spResult = null;
-      if (providerToken) {
+      let spWarning: string | null = null;
+
+      if (!providerToken) {
+        spWarning = "SharePoint folders were not created: no Graph token available. " +
+                    "Use 'Create folders' on the project to retry.";
+        console.error("Folder provisioning skipped — no Graph token", newProject.project_number);
+      } else {
         const folderName = sanitizeFolderName(
           newProject.project_number ?? String(newProject.id),
           newProject.project_address ?? "No_Address",
         );
-        spResult = await createProjectFolderTree(providerToken, folderName);
+        try {
+          spResult = await createProjectFolderTree(providerToken, folderName);
+        } catch (err) {
+          console.error("Folder provisioning threw", newProject.project_number, err);
+        }
+
         if (spResult) {
           await supabase.from("projects").update({
             sharepoint_folder_id: spResult.id,
@@ -314,14 +489,20 @@ serve(async (req) => {
             sharepoint_folder_id: spResult.id,
             sharepoint_folder_url: spResult.webUrl,
           });
+        } else {
+          spWarning = "The project was saved but SharePoint folders could not be created. " +
+                      "Use 'Create folders' on the project to retry.";
+          console.error("Folder provisioning failed", newProject.project_number);
         }
       }
 
       return json({
         data: newProject,
+        warning: spWarning,
         meta: {
           tasks_seeded: taskCount,
           sharepoint_created: !!spResult,
+          sharepoint_warning: spWarning,
           sharepoint_subfolders: spResult?.subfolders ? Object.keys(spResult.subfolders).length : 0,
         },
       });
