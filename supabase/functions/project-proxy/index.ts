@@ -194,6 +194,55 @@ function sanitizeFolderName(projectNumber: string, address: string): string {
     .substring(0, 240);
 }
 
+// Folder name for a CLIENT or a SITE.
+//
+// SharePoint caps the full decoded URL at 400 characters, and every space is
+// URL-encoded to %20 (3 chars). With Client/Site/Project nesting plus a
+// subfolder plus a filename, long names eat the budget fast — so names are
+// slugged (spaces to underscores) and capped. 28 is the agreed cap for both
+// tiers; the project tier uses sanitizeFolderName() and its own cap.
+function sanitizeEntityName(name: string, cap = 28): string {
+  return String(name ?? "")
+    .replace(/[<>:"/\\|?*\x00-\x1f]/g, "")
+    .replace(/\b(c\/o|C\/O)\b/g, "")
+    .replace(/[,&'".]/g, "")
+    .replace(/\s+/g, "_")
+    .replace(/_+/g, "_")
+    .replace(/^_|_$/g, "")
+    .substring(0, cap)
+    .replace(/_$/, "") || "Unnamed";
+}
+
+// Server-side MOVE of a driveItem to a new parent. This is a real move, not a
+// copy — instant, and driveItem IDs, permissions and version history all
+// survive. It is what makes "this building changed management company" a
+// one-call operation instead of a re-upload.
+//
+// Only possible because folders are addressed by ID. A path-addressed folder
+// could not be moved without rewriting every stored path.
+async function moveGraphItem(
+  token: string,
+  itemId: string,
+  newParentId: string,
+): Promise<boolean> {
+  try {
+    const res = await fetch(`${GRAPH_BASE}/sites/${SP_SITE_ID}/drive/items/${itemId}`, {
+      method: "PATCH",
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ parentReference: { id: newParentId } }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      console.error("Graph move failed:", err?.error?.message ?? res.status);
+      return false;
+    }
+    return true;
+  } catch (e) {
+    console.error("Graph move threw:", e);
+    return false;
+  }
+}
+
 async function createGraphFolder(
   token: string,
   name: string,
@@ -1302,6 +1351,360 @@ serve(async (req) => {
         .select("*").order("created_at", { ascending: false });
       if (error) return json({ error: error.message }, 400);
       return json({ data });
+    }
+
+    // ========================================================================
+    // CLIENT / SITE / CONTACT  —  Deploy B
+    // ------------------------------------------------------------------------
+    // All writes are proxy-only (RLS grants authenticated SELECT and nothing
+    // else). Reads go straight from the frontend via the authenticated client.
+    //
+    // SharePoint folders for clients and sites are addressed by driveItem ID,
+    // never by path, so a rename or a move_site cannot orphan them.
+    // ========================================================================
+
+    // ---- CLIENTS -----------------------------------------------------------
+    if (action === "client_create") {
+      const caller = await lookupCallerProfile(userId, payload);
+      if (!caller) return json({ error: "Profile not found" }, 403);
+
+      const { client } = body;
+      if (!client?.name) return json({ error: "Client name is required" }, 400);
+
+      const { data: newClient, error } = await supabase.from("clients")
+        .insert({ ...client, created_by: caller.id })
+        .select().single();
+      if (error) return json({ error: error.message }, 400);
+
+      // Folder provisioning. DB is authoritative — never roll the row back.
+      let warning: string | null = null;
+      if (!providerToken) {
+        warning = "Client saved, but SharePoint folder was not created (no Graph token). Use 'Create folders' to retry.";
+        console.error("client folder skipped — no Graph token", newClient.name);
+      } else {
+        const folder = await createGraphFolder(
+          providerToken, sanitizeEntityName(newClient.name, 28), null,
+        );
+        if (folder) {
+          await supabase.from("clients").update({
+            sharepoint_folder_id: folder.id,
+            sharepoint_folder_url: folder.webUrl,
+          }).eq("id", newClient.id);
+          Object.assign(newClient, {
+            sharepoint_folder_id: folder.id,
+            sharepoint_folder_url: folder.webUrl,
+          });
+        } else {
+          warning = "Client saved, but the SharePoint folder could not be created. Use 'Create folders' to retry.";
+        }
+      }
+      return json({ data: newClient, warning });
+    }
+
+    if (action === "client_update") {
+      const caller = await lookupCallerProfile(userId, payload);
+      if (!caller) return json({ error: "Profile not found" }, 403);
+      const { id: clientId, updates: clientUpdates } = body;
+      if (!clientId) return json({ error: "clientId required" }, 400);
+      const { data, error } = await supabase.from("clients")
+        .update({ ...clientUpdates, updated_at: new Date().toISOString() })
+        .eq("id", clientId).select().single();
+      if (error) return json({ error: error.message }, 400);
+      return json({ data });
+    }
+
+    // Soft delete. Clients are referenced by sites, contacts, and projects;
+    // a hard delete would either cascade or fail on the sites restrict FK.
+    if (action === "client_delete") {
+      const caller = await lookupCallerProfile(userId, payload);
+      if (!caller || caller.role !== "admin") return json({ error: "Admin only" }, 403);
+      const { id: clientId } = body;
+      const { data, error } = await supabase.from("clients")
+        .update({ is_active: false, updated_at: new Date().toISOString() })
+        .eq("id", clientId).select().single();
+      if (error) return json({ error: error.message }, 400);
+      return json({ data });
+    }
+
+    // Promote prospect -> client. Called when a project is awarded (Stage 3).
+    // Idempotent; safe to call on an already-promoted client.
+    if (action === "client_promote") {
+      const caller = await lookupCallerProfile(userId, payload);
+      if (!caller) return json({ error: "Profile not found" }, 403);
+      const { id: clientId } = body;
+      if (!clientId) return json({ error: "clientId required" }, 400);
+      const { data, error } = await supabase.from("clients")
+        .update({ relationship_status: "client", updated_at: new Date().toISOString() })
+        .eq("id", clientId).eq("relationship_status", "prospect")
+        .select().maybeSingle();
+      if (error) return json({ error: error.message }, 400);
+      return json({ data, promoted: !!data });
+    }
+
+    // ---- SITES -------------------------------------------------------------
+    if (action === "site_create") {
+      const caller = await lookupCallerProfile(userId, payload);
+      if (!caller) return json({ error: "Profile not found" }, 403);
+
+      const { site } = body;
+      if (!site?.client_id) return json({ error: "client_id is required" }, 400);
+      if (!site?.name) return json({ error: "Site name is required" }, 400);
+
+      const { data: newSite, error } = await supabase.from("sites")
+        .insert({ ...site, created_by: caller.id })
+        .select().single();
+      if (error) return json({ error: error.message }, 400);
+
+      let warning: string | null = null;
+      if (providerToken) {
+        const { data: parent } = await supabase.from("clients")
+          .select("sharepoint_folder_id").eq("id", site.client_id).maybeSingle();
+        if (parent?.sharepoint_folder_id) {
+          const folder = await createGraphFolder(
+            providerToken, sanitizeEntityName(newSite.name, 28), parent.sharepoint_folder_id,
+          );
+          if (folder) {
+            await supabase.from("sites").update({
+              sharepoint_folder_id: folder.id,
+              sharepoint_folder_url: folder.webUrl,
+            }).eq("id", newSite.id);
+            Object.assign(newSite, {
+              sharepoint_folder_id: folder.id,
+              sharepoint_folder_url: folder.webUrl,
+            });
+          } else {
+            warning = "Site saved, but its SharePoint folder could not be created.";
+          }
+        } else {
+          warning = "Site saved. The client has no SharePoint folder yet — create the client folder first, then retry.";
+        }
+      } else {
+        warning = "Site saved, but SharePoint folder was not created (no Graph token).";
+      }
+      return json({ data: newSite, warning });
+    }
+
+    if (action === "site_update") {
+      const caller = await lookupCallerProfile(userId, payload);
+      if (!caller) return json({ error: "Profile not found" }, 403);
+      const { id: siteId, updates: siteUpdates } = body;
+      if (!siteId) return json({ error: "siteId required" }, 400);
+      // client_id changes go through move_site so the folder follows.
+      const safe = { ...siteUpdates };
+      delete safe.client_id;
+      const { data, error } = await supabase.from("sites")
+        .update({ ...safe, updated_at: new Date().toISOString() })
+        .eq("id", siteId).select().single();
+      if (error) return json({ error: error.message }, 400);
+      return json({ data });
+    }
+
+    if (action === "site_delete") {
+      const caller = await lookupCallerProfile(userId, payload);
+      if (!caller || caller.role !== "admin") return json({ error: "Admin only" }, 403);
+      const { id: siteId } = body;
+      const { data, error } = await supabase.from("sites")
+        .update({ is_active: false, updated_at: new Date().toISOString() })
+        .eq("id", siteId).select().single();
+      if (error) return json({ error: error.message }, 400);
+      return json({ data });
+    }
+
+    // ---- MOVE SITE TO A DIFFERENT CLIENT -----------------------------------
+    // A building changes management company. The DB row is reassigned and the
+    // SharePoint folder is MOVED server-side (Graph PATCH on parentReference),
+    // so every project and file under it follows. IDs and version history are
+    // preserved. qb_customer_job on existing projects is deliberately NOT
+    // rewritten — invoices raised under the old agent stay keyed to the old
+    // agent.
+    if (action === "move_site") {
+      const caller = await lookupCallerProfile(userId, payload);
+      if (!caller || caller.role !== "admin") return json({ error: "Admin only" }, 403);
+
+      const { siteId, newClientId } = body;
+      if (!siteId || !newClientId) {
+        return json({ error: "siteId and newClientId are required" }, 400);
+      }
+
+      const { data: site } = await supabase.from("sites")
+        .select("id, name, client_id, sharepoint_folder_id").eq("id", siteId).maybeSingle();
+      if (!site) return json({ error: "Site not found" }, 404);
+      if (site.client_id === newClientId) {
+        return json({ error: "Site already belongs to that client" }, 400);
+      }
+
+      const { data: newParent } = await supabase.from("clients")
+        .select("id, name, sharepoint_folder_id").eq("id", newClientId).maybeSingle();
+      if (!newParent) return json({ error: "Target client not found" }, 404);
+
+      // DB first. A row pointing at the old folder is recoverable; a moved
+      // folder with no row is an orphan.
+      const { data: moved, error } = await supabase.from("sites")
+        .update({ client_id: newClientId, updated_at: new Date().toISOString() })
+        .eq("id", siteId).select().single();
+      if (error) return json({ error: error.message }, 400);
+
+      let warning: string | null = null;
+      if (!providerToken) {
+        warning = "Site reassigned, but the SharePoint folder was not moved (no Graph token).";
+      } else if (!site.sharepoint_folder_id) {
+        warning = "Site reassigned. It had no SharePoint folder to move.";
+      } else if (!newParent.sharepoint_folder_id) {
+        warning = "Site reassigned, but the target client has no SharePoint folder. Create it, then use 'Create folders'.";
+      } else {
+        const ok = await moveGraphItem(
+          providerToken, site.sharepoint_folder_id, newParent.sharepoint_folder_id,
+        );
+        if (!ok) {
+          warning = "Site reassigned in the app, but the SharePoint folder move failed. The folder is still under the old client.";
+        }
+      }
+
+      await writeAudit(caller.id, "move_site", {
+        site_id: siteId, site_name: site.name,
+        from_client: site.client_id, to_client: newClientId,
+      }).catch(() => {});
+
+      return json({ data: moved, warning });
+    }
+
+    // ---- CONTACTS ----------------------------------------------------------
+    if (action === "contact_create") {
+      const caller = await lookupCallerProfile(userId, payload);
+      if (!caller) return json({ error: "Profile not found" }, 403);
+      const { contact, siteIds } = body;
+      if (!contact?.client_id) return json({ error: "client_id is required" }, 400);
+
+      const { data: newContact, error } = await supabase.from("contacts")
+        .insert({ ...contact, created_by: caller.id })
+        .select().single();
+      if (error) return json({ error: error.message }, 400);
+
+      // One person can cover several buildings.
+      if (Array.isArray(siteIds) && siteIds.length) {
+        const links = siteIds.map((sid: string) => ({ site_id: sid, contact_id: newContact.id }));
+        await supabase.from("site_contacts").upsert(links, { onConflict: "site_id,contact_id" });
+      }
+      return json({ data: newContact });
+    }
+
+    if (action === "contact_update") {
+      const caller = await lookupCallerProfile(userId, payload);
+      if (!caller) return json({ error: "Profile not found" }, 403);
+      const { id: contactId, updates: contactUpdates, siteIds } = body;
+      if (!contactId) return json({ error: "contactId required" }, 400);
+
+      const { data, error } = await supabase.from("contacts")
+        .update({ ...contactUpdates, updated_at: new Date().toISOString() })
+        .eq("id", contactId).select().single();
+      if (error) return json({ error: error.message }, 400);
+
+      // When siteIds is supplied it is authoritative — replace the set.
+      if (Array.isArray(siteIds)) {
+        await supabase.from("site_contacts").delete().eq("contact_id", contactId);
+        if (siteIds.length) {
+          await supabase.from("site_contacts")
+            .insert(siteIds.map((sid: string) => ({ site_id: sid, contact_id: contactId })));
+        }
+      }
+      return json({ data });
+    }
+
+    if (action === "contact_delete") {
+      const caller = await lookupCallerProfile(userId, payload);
+      if (!caller) return json({ error: "Profile not found" }, 403);
+      const { id: contactId } = body;
+      const { data, error } = await supabase.from("contacts")
+        .update({ is_active: false, updated_at: new Date().toISOString() })
+        .eq("id", contactId).select().single();
+      if (error) return json({ error: error.message }, 400);
+      return json({ data });
+    }
+
+    if (action === "site_contact_add") {
+      const caller = await lookupCallerProfile(userId, payload);
+      if (!caller) return json({ error: "Profile not found" }, 403);
+      const { siteId, contactId, roleNote } = body;
+      if (!siteId || !contactId) return json({ error: "siteId and contactId required" }, 400);
+      const { data, error } = await supabase.from("site_contacts")
+        .upsert({ site_id: siteId, contact_id: contactId, role_note: roleNote ?? null },
+                { onConflict: "site_id,contact_id" })
+        .select().single();
+      if (error) return json({ error: error.message }, 400);
+      return json({ data });
+    }
+
+    if (action === "site_contact_remove") {
+      const caller = await lookupCallerProfile(userId, payload);
+      if (!caller) return json({ error: "Profile not found" }, 403);
+      const { siteId, contactId } = body;
+      const { error } = await supabase.from("site_contacts")
+        .delete().eq("site_id", siteId).eq("contact_id", contactId);
+      if (error) return json({ error: error.message }, 400);
+      return json({ ok: true });
+    }
+
+    if (action === "project_contact_add") {
+      const caller = await lookupCallerProfile(userId, payload);
+      if (!caller) return json({ error: "Profile not found" }, 403);
+      const { projectId: pid, contactId, roleNote } = body;
+      if (!pid || !contactId) return json({ error: "projectId and contactId required" }, 400);
+      const { data, error } = await supabase.from("project_contacts")
+        .upsert({ project_id: pid, contact_id: contactId, role_note: roleNote ?? null },
+                { onConflict: "project_id,contact_id" })
+        .select().single();
+      if (error) return json({ error: error.message }, 400);
+      return json({ data });
+    }
+
+    if (action === "project_contact_remove") {
+      const caller = await lookupCallerProfile(userId, payload);
+      if (!caller) return json({ error: "Profile not found" }, 403);
+      const { projectId: pid, contactId } = body;
+      const { error } = await supabase.from("project_contacts")
+        .delete().eq("project_id", pid).eq("contact_id", contactId);
+      if (error) return json({ error: error.message }, 400);
+      return json({ ok: true });
+    }
+
+    // ---- BACKFILL CLIENT / SITE FOLDERS ------------------------------------
+    // Provisions anything where sharepoint_folder_id IS NULL. Clients first,
+    // because a site folder needs its client folder to exist as a parent.
+    if (action === "backfill_folders") {
+      const caller = await lookupCallerProfile(userId, payload);
+      if (!caller || caller.role !== "admin") return json({ error: "Admin only" }, 403);
+      if (!providerToken) return json({ error: "No Graph token available" }, 503);
+
+      const result = { clients: 0, sites: 0, failed: [] as string[] };
+
+      const { data: pendingClients } = await supabase.from("clients")
+        .select("id, name").is("sharepoint_folder_id", null).eq("is_active", true);
+      for (const c of pendingClients ?? []) {
+        const f = await createGraphFolder(providerToken, sanitizeEntityName(c.name, 28), null);
+        if (f) {
+          await supabase.from("clients")
+            .update({ sharepoint_folder_id: f.id, sharepoint_folder_url: f.webUrl })
+            .eq("id", c.id);
+          result.clients++;
+        } else result.failed.push(`client: ${c.name}`);
+      }
+
+      const { data: pendingSites } = await supabase.from("sites")
+        .select("id, name, client_id").is("sharepoint_folder_id", null).eq("is_active", true);
+      for (const s of pendingSites ?? []) {
+        const { data: parent } = await supabase.from("clients")
+          .select("sharepoint_folder_id").eq("id", s.client_id).maybeSingle();
+        if (!parent?.sharepoint_folder_id) { result.failed.push(`site (no client folder): ${s.name}`); continue; }
+        const f = await createGraphFolder(providerToken, sanitizeEntityName(s.name, 28), parent.sharepoint_folder_id);
+        if (f) {
+          await supabase.from("sites")
+            .update({ sharepoint_folder_id: f.id, sharepoint_folder_url: f.webUrl })
+            .eq("id", s.id);
+          result.sites++;
+        } else result.failed.push(`site: ${s.name}`);
+      }
+
+      return json({ data: result });
     }
 
     return json({ error: `Unknown action: ${action}` }, 400);

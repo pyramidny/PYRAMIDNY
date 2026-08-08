@@ -12,6 +12,9 @@ import Settings from '@/pages/Settings'
 import Notifications from '@/pages/Notifications'
 import ProjectDetail from '@/pages/ProjectDetail'
 import { ProjectList } from '@/pages/ProjectList'
+import ClientList from '@/pages/ClientList'
+import ClientDetail from '@/pages/ClientDetail'
+import SiteDetail from '@/pages/SiteDetail'
 import { Navigate, Route, Routes, useLocation } from 'react-router-dom'
 
 export default function App() {
@@ -42,6 +45,9 @@ export default function App() {
         <Route path="/projects" element={<ProjectList />} />
         <Route path="/projects/new" element={<NewProject />} />
         <Route path="/projects/:id" element={<ProjectDetail />} />
+        <Route path="/clients" element={<ClientList />} />
+        <Route path="/clients/:id" element={<ClientDetail />} />
+        <Route path="/sites/:id" element={<SiteDetail />} />
         <Route path="/tasks" element={<MyTasks />} />
         <Route path="/tools" element={<ToolControl />} />
         <Route path="/team" element={<TeamManagement />} />

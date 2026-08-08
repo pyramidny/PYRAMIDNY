@@ -49,6 +49,20 @@ export const POLICY = {
 
   // Staff management
   manage_staff:          ["admin"],
+
+  // Clients / sites / contacts  (Deploy B)
+  // Estimating and PMs work in here daily, so creation is NOT admin-only.
+  // Destructive and structural operations stay locked to admin.
+  view_clients:          ["*"],
+  create_client:         ["admin", "director_of_operations", "project_manager",
+                          "assistant_pm", "estimator", "estimating_coordinator",
+                          "sales_rep", "office_manager"],
+  edit_client:           ["admin", "director_of_operations", "project_manager",
+                          "assistant_pm", "estimator", "estimating_coordinator",
+                          "sales_rep", "office_manager"],
+  delete_client:         ["admin"],
+  move_site:             ["admin"],
+  backfill_folders:      ["admin"],
 }
 
 /**

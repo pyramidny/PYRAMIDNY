@@ -4,10 +4,11 @@
 // Passes both Supabase JWT (for auth) and Microsoft Graph provider_token
 // (for SharePoint folder creation).
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useAuth } from '@/context/AuthContext'
 import { useCanDo } from '@/lib/permissions'
+import { supabase } from '@/lib/supabase'
 
 const PROXY_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/project-proxy`
 const SB_TOKEN_KEY = 'sb-izjaxmcdlsdkdliqjlei-auth-token'
@@ -46,6 +47,8 @@ const STATUSES = [
 
 const EMPTY = {
   division:               'regular',
+  client_id:              '',
+  site_id:                '',
   status:                 'New Bid',
   project_address:        '',
   scope_type:             '',
@@ -143,6 +146,30 @@ export default function NewProject() {
   const [serverErr, setServerErr] = useState(null)
   const [saveMeta, setSaveMeta]   = useState(null)
 
+  // Client / job-site pickers. Optional at bid — a bid invite routinely
+  // arrives before anyone knows which entity will be billed, and forcing the
+  // field just produces junk client records. Required at Stage 3 (Awarded),
+  // which is where contract and billing handoff already happen.
+  const [clients, setClients] = useState([])
+  const [sites, setSites]     = useState([])
+
+  useEffect(() => {
+    supabase.from('clients')
+      .select('id, name, relationship_status')
+      .eq('is_active', true).order('name')
+      .then(({ data }) => setClients(data ?? []))
+  }, [])
+
+  // Site list is scoped to the chosen client, so a building can never be
+  // attached to the wrong management company.
+  useEffect(() => {
+    if (!form.client_id) { setSites([]); return }
+    supabase.from('sites')
+      .select('id, name, address_line1, borough')
+      .eq('client_id', form.client_id).eq('is_active', true).order('name')
+      .then(({ data }) => setSites(data ?? []))
+  }, [form.client_id])
+
   // Hard guard — if you somehow land here without permission, show a friendly
   // message instead of letting you fill out a form that will 403 on save.
   if (!canDo('create_project')) {
@@ -204,6 +231,8 @@ export default function NewProject() {
             status:                 form.status,
             project_address:        form.project_address.trim(),
             scope_type:             form.scope_type || null,
+            client_id:              form.client_id || null,
+            site_id:                form.site_id || null,
             property_manager_owner: form.property_manager_owner.trim() || null,
             architect_engineer:     form.architect_engineer.trim() || null,
             bid_amount:             form.bid_amount ? Number(form.bid_amount) : null,
@@ -307,7 +336,54 @@ export default function NewProject() {
 
           <div className="space-y-10">
 
-            <Section number="1" title="Scope">
+            <Section number="1" title="Client & Job Site">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <Label>Client</Label>
+                  <select
+                    className="input w-full text-gray-900 bg-white"
+                    value={form.client_id}
+                    onChange={(e) =>
+                      setForm((p) => ({ ...p, client_id: e.target.value, site_id: '' }))}
+                  >
+                    <option value="">— Not known yet —</option>
+                    {clients.map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.name}{c.relationship_status === 'prospect' ? ' (prospect)' : ''}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <Label>Job Site</Label>
+                  <select
+                    className="input w-full text-gray-900 bg-white disabled:opacity-50"
+                    value={form.site_id}
+                    disabled={!form.client_id}
+                    onChange={set('site_id')}
+                  >
+                    <option value="">
+                      {form.client_id ? '— Select a building —' : 'Pick a client first'}
+                    </option>
+                    {sites.map((s) => (
+                      <option key={s.id} value={s.id}>
+                        {s.name}{s.borough ? ` \u00b7 ${s.borough}` : ''}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              <p className="mt-3 text-xs text-gray-500">
+                Both are optional at bid stage. If the company is new, add it under{' '}
+                <Link to="/clients" className="text-pyramid-600 hover:text-pyramid-500">Clients</Link>{' '}
+                as a prospect first — it promotes to a client automatically on the first won bid.
+                A client and site are required before the job can be marked awarded.
+              </p>
+            </Section>
+
+            <Section number="2" title="Scope">
               <div>
                 <Label required>Scope Type</Label>
                 <div className="relative">
@@ -339,7 +415,7 @@ export default function NewProject() {
               </div>
             </Section>
 
-            <Section number="2" title="Contacts">
+            <Section number="3" title="Contacts">
               <div>
                 <Label>Property Manager / Owner</Label>
                 <Input
@@ -360,7 +436,7 @@ export default function NewProject() {
               </div>
             </Section>
 
-            <Section number="3" title="Bid Amount">
+            <Section number="4" title="Bid Amount">
               <div className="max-w-xs">
                 <Label>Bid Amount</Label>
                 <div className="relative">
@@ -380,7 +456,7 @@ export default function NewProject() {
               </div>
             </Section>
 
-            <Section number="4" title="Timeline">
+            <Section number="5" title="Timeline">
               <div className="max-w-xs">
                 <Label>Due Date</Label>
                 <Input
