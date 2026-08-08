@@ -123,27 +123,27 @@ export default function SiteDetail() {
     } catch (e) { setBanner({ kind: 'error', text: e.message }) }
   }
 
-  if (loading) return <div className="p-6 text-ink-400 text-sm">Loading…</div>
-  if (!site) return <div className="p-6 text-ink-400 text-sm">Job site not found.</div>
+  if (loading) return <div className="p-6 text-gray-500 text-sm">Loading…</div>
+  if (!site) return <div className="p-6 text-gray-500 text-sm">Job site not found.</div>
 
   return (
     <div className="p-6 max-w-5xl mx-auto">
-      <div className="flex items-center gap-2 text-sm text-ink-400 mb-4">
-        <Link to="/clients" className="hover:text-ink-200 inline-flex items-center gap-1.5">
+      <div className="flex items-center gap-2 text-sm text-gray-500 mb-4">
+        <Link to="/clients" className="hover:text-gray-700 inline-flex items-center gap-1.5">
           <ArrowLeft size={15} /> Clients
         </Link>
         {client && (
           <>
             <span>/</span>
-            <Link to={`/clients/${client.id}`} className="hover:text-ink-200">{client.name}</Link>
+            <Link to={`/clients/${client.id}`} className="hover:text-gray-700">{client.name}</Link>
           </>
         )}
       </div>
 
       <div className="flex items-start justify-between gap-4 flex-wrap">
         <div>
-          <h1 className="text-2xl font-bold text-ink-100">{site.name}</h1>
-          <p className="text-sm text-ink-400 mt-1">
+          <h1 className="text-2xl font-bold text-gray-900">{site.name}</h1>
+          <p className="text-sm text-gray-500 mt-1">
             {[site.address_line1, site.borough, site.city].filter(Boolean).join(', ') || '—'}
           </p>
           <div className="flex items-center gap-2 mt-2 flex-wrap">
@@ -152,7 +152,7 @@ export default function SiteDetail() {
             {site.phone && <Tag>{site.phone}</Tag>}
             {site.sharepoint_folder_url && (
               <a href={site.sharepoint_folder_url} target="_blank" rel="noreferrer"
-                className="text-[10px] px-2 py-0.5 rounded bg-ink-700 text-ink-300 hover:text-ink-100 inline-flex items-center gap-1">
+                className="text-[10px] px-2 py-0.5 rounded bg-gray-100 text-gray-600 hover:text-gray-900 inline-flex items-center gap-1">
                 SharePoint <ExternalLink size={10} />
               </a>
             )}
@@ -160,7 +160,7 @@ export default function SiteDetail() {
         </div>
         {canDo('move_site') && (
           <button onClick={() => setMoveTo(site.client_id)}
-            className="flex items-center gap-1.5 px-3 py-2 rounded border border-ink-700 text-ink-300 hover:text-ink-100 text-sm">
+            className="flex items-center gap-1.5 px-3 py-2 rounded border border-gray-200 text-gray-600 hover:text-gray-900 text-sm">
             <MoveRight size={15} /> Move to client
           </button>
         )}
@@ -168,9 +168,9 @@ export default function SiteDetail() {
 
       {banner && (
         <div className={'mt-4 px-4 py-3 rounded text-sm ' +
-          (banner.kind === 'error' ? 'bg-red-900/40 text-red-200 border border-red-700'
-            : banner.kind === 'warn' ? 'bg-amber-900/30 text-amber-200 border border-amber-700'
-            : 'bg-blue-900/30 text-blue-200 border border-blue-800')}>
+          (banner.kind === 'error' ? 'bg-red-50 text-red-700 border border-red-200'
+            : banner.kind === 'warn' ? 'bg-amber-50 text-amber-800 border border-amber-200'
+            : 'bg-blue-50 text-blue-800 border border-blue-200')}>
           {banner.text}
         </div>
       )}
@@ -181,7 +181,7 @@ export default function SiteDetail() {
           <button onClick={() => setContactForm({
             first_name: '', last_name: '', title: '', email: '',
             phone: '', mobile: '', contact_type: 'superintendent', is_billing_contact: false,
-          })} className="text-xs px-3 py-1.5 rounded bg-ink-700 hover:bg-ink-600 text-ink-100">
+          })} className="text-xs px-3 py-1.5 rounded bg-gray-100 hover:bg-gray-200 text-gray-900">
             + Contact
           </button>
         )}
@@ -189,19 +189,19 @@ export default function SiteDetail() {
         {contacts.length === 0 ? (
           <Empty>No site contacts yet — add the super or on-site PM.</Empty>
         ) : contacts.map(ct => (
-          <div key={ct.id} className="px-4 py-3 border-t border-ink-800 first:border-t-0">
+          <div key={ct.id} className="px-4 py-3 border-t border-gray-200 first:border-t-0">
             <div className="flex items-start gap-2">
-              <User size={14} className="text-ink-500 mt-1 shrink-0" />
+              <User size={14} className="text-gray-400 mt-1 shrink-0" />
               <div className="min-w-0 flex-1">
-                <div className="font-medium text-ink-100">{ct.full_name || '—'}</div>
-                <div className="text-xs text-ink-400 mt-0.5">
+                <div className="font-medium text-gray-900">{ct.full_name || '—'}</div>
+                <div className="text-xs text-gray-500 mt-0.5">
                   {[ct.title, ct.email, ct.phone, ct.mobile && `Cell ${ct.mobile}`]
                     .filter(Boolean).join(' · ') || labelFor(CONTACT_TYPES, ct.contact_type)}
                 </div>
                 {ct.alsoSites?.length > 0 && (
                   <div className="mt-1.5 flex flex-wrap gap-1">
                     {ct.alsoSites.map(n => (
-                      <span key={n} className="text-[10px] px-1.5 py-0.5 rounded bg-ink-700 text-ink-300">
+                      <span key={n} className="text-[10px] px-1.5 py-0.5 rounded bg-gray-100 text-gray-600">
                         ALSO {n.toUpperCase()}
                       </span>
                     ))}
@@ -210,13 +210,13 @@ export default function SiteDetail() {
               </div>
               {canDo('edit_client') && (
                 <button onClick={() => unlink(ct.id)}
-                  className="text-xs text-ink-500 hover:text-red-300 shrink-0">Unlink</button>
+                  className="text-xs text-gray-400 hover:text-red-300 shrink-0">Unlink</button>
               )}
             </div>
           </div>
         ))}
         {contacts.some(c => c.alsoSites?.length) && (
-          <div className="px-4 py-3 border-t border-ink-800 bg-blue-900/15 text-xs text-blue-200">
+          <div className="px-4 py-3 border-t border-gray-200 bg-blue-900/15 text-xs text-blue-200">
             One person can cover several buildings — contacts attach many-to-many, so
             editing them here updates them everywhere.
           </div>
@@ -228,14 +228,14 @@ export default function SiteDetail() {
           <Empty>No projects at this building yet.</Empty>
         ) : projects.map(p => (
           <Link key={p.id} to={`/projects/${p.id}`}
-            className="flex items-center gap-3 px-4 py-3 border-t border-ink-800 first:border-t-0 hover:bg-ink-800/50">
-            <Building2 size={15} className="text-ink-500 shrink-0" />
+            className="flex items-center gap-3 px-4 py-3 border-t border-gray-200 first:border-t-0 hover:bg-gray-50">
+            <Building2 size={15} className="text-gray-400 shrink-0" />
             <span className="font-mono text-xs text-blue-300 shrink-0">{p.project_number}</span>
             <div className="min-w-0 flex-1">
-              <div className="text-ink-100 truncate text-sm">{p.project_address}</div>
-              <div className="text-xs text-ink-400">{p.scope_type ?? '—'}</div>
+              <div className="text-gray-900 truncate text-sm">{p.project_address}</div>
+              <div className="text-xs text-gray-500">{p.scope_type ?? '—'}</div>
             </div>
-            <span className="text-xs text-ink-500 shrink-0">Stage {p.current_stage} · {p.status}</span>
+            <span className="text-xs text-gray-400 shrink-0">Stage {p.current_stage} · {p.status}</span>
           </Link>
         ))}
       </Section>
@@ -301,7 +301,7 @@ export default function SiteDetail() {
               ))}
             </select>
           </Field>
-          <div className="px-3 py-2 rounded bg-blue-900/25 border border-blue-800 text-blue-200 text-xs space-y-1">
+          <div className="px-3 py-2 rounded bg-blue-50 border border-blue-200 text-blue-800 text-xs space-y-1">
             <p>Every project at this building moves with it, and the SharePoint folder is
             moved server-side — no re-upload, version history intact.</p>
             <p>Billing history is not touched. Invoices already raised under the old
@@ -315,25 +315,25 @@ export default function SiteDetail() {
 
 /* ---- small building blocks ---- */
 const Tag = ({ children }) =>
-  <span className="text-[10px] px-2 py-0.5 rounded bg-ink-700 text-ink-300 font-mono">{children}</span>
+  <span className="text-[10px] px-2 py-0.5 rounded bg-gray-100 text-gray-600 font-mono">{children}</span>
 
 function Section({ title, action, children }) {
   return (
     <div className="mt-6">
       <div className="flex items-center justify-between mb-2">
-        <h2 className="text-xs uppercase tracking-wider text-ink-400 font-semibold">{title}</h2>
+        <h2 className="text-xs uppercase tracking-wider text-gray-500 font-semibold">{title}</h2>
         {action}
       </div>
-      <div className="border border-ink-800 rounded overflow-hidden">{children}</div>
+      <div className="border border-gray-200 rounded overflow-hidden">{children}</div>
     </div>
   )
 }
-const Empty = ({ children }) => <div className="px-4 py-6 text-sm text-ink-500">{children}</div>
+const Empty = ({ children }) => <div className="px-4 py-6 text-sm text-gray-400">{children}</div>
 
 function Field({ label, children }) {
   return (
     <label className="block">
-      <span className="block text-xs uppercase tracking-wide text-ink-400 mb-1">{label}</span>
+      <span className="block text-xs uppercase tracking-wide text-gray-500 mb-1">{label}</span>
       {children}
     </label>
   )
@@ -342,14 +342,14 @@ function Field({ label, children }) {
 function Modal({ title, onClose, onSave, saveLabel, children }) {
   return (
     <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4">
-      <div className="bg-ink-900 border border-ink-700 rounded-lg w-full max-w-lg max-h-[90vh] overflow-y-auto">
-        <div className="flex items-center justify-between px-5 py-4 border-b border-ink-800">
-          <h2 className="text-lg font-semibold text-ink-100">{title}</h2>
-          <button onClick={onClose} className="text-ink-400 hover:text-ink-200">✕</button>
+      <div className="bg-white border border-gray-200 rounded-lg w-full max-w-lg max-h-[90vh] overflow-y-auto">
+        <div className="flex items-center justify-between px-5 py-4 border-b border-gray-200">
+          <h2 className="text-lg font-semibold text-gray-900">{title}</h2>
+          <button onClick={onClose} className="text-gray-500 hover:text-gray-700">✕</button>
         </div>
         <div className="p-5 space-y-4">{children}</div>
-        <div className="flex justify-end gap-2 px-5 py-4 border-t border-ink-800">
-          <button onClick={onClose} className="px-4 py-2 rounded text-sm text-ink-300 hover:text-ink-100">Cancel</button>
+        <div className="flex justify-end gap-2 px-5 py-4 border-t border-gray-200">
+          <button onClick={onClose} className="px-4 py-2 rounded text-sm text-gray-600 hover:text-gray-900">Cancel</button>
           <button onClick={onSave}
             className="px-4 py-2 rounded bg-orange-600 hover:bg-orange-700 text-white text-sm font-medium">
             {saveLabel}

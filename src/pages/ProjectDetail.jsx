@@ -197,6 +197,12 @@ export default function ProjectDetail() {
   // Derived from existing files; null until at least one file is uploaded.
   const projectFolderUrl = useMemo(() => deriveProjectFolderUrl(documents), [documents])
 
+  // Client / job site / project contacts. The hierarchy is Client -> Site ->
+  // Project, so this is the project's view back up the tree.
+  const [clientInfo, setClientInfo] = useState(null)
+  const [siteInfo, setSiteInfo]     = useState(null)
+  const [projContacts, setProjContacts] = useState([])
+
   useEffect(() => {
     if (!id) return
     ;(async () => {
@@ -207,6 +213,33 @@ export default function ProjectDetail() {
           .from('projects').select('*').eq('id', id).single()
         if (pe) throw pe
         setProject(proj)
+
+        // Walk up the hierarchy. Both are nullable — a bid can exist before
+        // anyone knows the billing entity.
+        if (proj.client_id) {
+          const { data: cl } = await supabase.from('clients')
+            .select('id, name, client_type, relationship_status, phone, email')
+            .eq('id', proj.client_id).maybeSingle()
+          setClientInfo(cl ?? null)
+        } else setClientInfo(null)
+
+        if (proj.site_id) {
+          const { data: st } = await supabase.from('sites')
+            .select('id, name, address_line1, borough, bin_number, phone')
+            .eq('id', proj.site_id).maybeSingle()
+          setSiteInfo(st ?? null)
+
+          // People on this building, via the many-to-many link.
+          const { data: links } = await supabase.from('site_contacts')
+            .select('contact_id').eq('site_id', proj.site_id)
+          const cids = (links ?? []).map(l => l.contact_id)
+          if (cids.length) {
+            const { data: cts } = await supabase.from('contacts')
+              .select('id, full_name, title, email, phone, mobile, is_billing_contact')
+              .in('id', cids).eq('is_active', true)
+            setProjContacts(cts ?? [])
+          } else setProjContacts([])
+        } else { setSiteInfo(null); setProjContacts([]) }
 
         const { data: ms, error: mse } = await supabase
           .from('project_milestones')
@@ -485,6 +518,74 @@ export default function ProjectDetail() {
             <p className="text-xs text-gray-400 uppercase tracking-wide mb-1">Created</p>
             <p className="text-sm font-medium text-gray-900">{fmtLongDate(project.created_at)}</p>
           </div>
+          <div className="sm:col-span-2 bg-white rounded-lg border border-gray-200 p-4">
+            <p className="text-xs text-gray-400 uppercase tracking-wide mb-3">Client &amp; Job Site</p>
+            {!project.client_id && !project.site_id ? (
+              <p className="text-sm text-gray-500">
+                No client or job site linked yet.{' '}
+                <a href="/clients" className="text-blue-600 hover:text-blue-800">Add one under Clients</a>
+                {' '}\u2014 required before this job can be marked awarded.
+              </p>
+            ) : (
+              <div className="space-y-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <p className="text-xs text-gray-400 block mb-1">Client</p>
+                    {clientInfo ? (
+                      <a href={`/clients/${clientInfo.id}`}
+                         className="text-sm font-medium text-blue-600 hover:text-blue-800">
+                        {clientInfo.name}
+                        {clientInfo.relationship_status === 'prospect' && (
+                          <span className="ml-2 text-[10px] px-1.5 py-0.5 rounded bg-gray-100 text-gray-600 align-middle">
+                            PROSPECT
+                          </span>
+                        )}
+                      </a>
+                    ) : <p className="text-sm text-gray-500">\u2014</p>}
+                  </div>
+                  <div>
+                    <p className="text-xs text-gray-400 block mb-1">Job Site</p>
+                    {siteInfo ? (
+                      <>
+                        <a href={`/sites/${siteInfo.id}`}
+                           className="text-sm font-medium text-blue-600 hover:text-blue-800">
+                          {siteInfo.name}
+                        </a>
+                        <p className="text-xs text-gray-400 mt-0.5">
+                          {[siteInfo.address_line1, siteInfo.borough,
+                            siteInfo.bin_number && `BIN ${siteInfo.bin_number}`]
+                            .filter(Boolean).join(' \u00b7 ')}
+                        </p>
+                      </>
+                    ) : <p className="text-sm text-gray-500">\u2014</p>}
+                  </div>
+                </div>
+
+                {projContacts.length > 0 && (
+                  <div className="pt-3 border-t border-gray-200">
+                    <p className="text-xs text-gray-400 uppercase tracking-wide mb-2">Site contacts</p>
+                    <div className="space-y-2">
+                      {projContacts.map(ct => (
+                        <div key={ct.id} className="text-sm">
+                          <span className="font-medium text-gray-900">{ct.full_name}</span>
+                          {ct.is_billing_contact && (
+                            <span className="ml-2 text-[10px] px-1.5 py-0.5 rounded bg-green-50 text-green-700 border border-green-200">
+                              RECEIVES INVOICES
+                            </span>
+                          )}
+                          <p className="text-xs text-gray-400">
+                            {[ct.title, ct.email, ct.phone, ct.mobile && `Cell ${ct.mobile}`]
+                              .filter(Boolean).join(' \u00b7 ')}
+                          </p>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+
           <div className="sm:col-span-2 bg-white rounded-lg border border-gray-200 p-4">
             <div className="flex items-center justify-between mb-3">
               <p className="text-xs text-gray-400 uppercase tracking-wide">Timeline</p>

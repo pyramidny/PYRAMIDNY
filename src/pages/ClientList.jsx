@@ -127,8 +127,8 @@ export default function ClientList() {
     <div className="p-6 max-w-6xl mx-auto">
       <div className="flex items-start justify-between gap-4 mb-1">
         <div>
-          <h1 className="text-2xl font-bold text-ink-100">Clients</h1>
-          <p className="text-sm text-ink-400 mt-1">
+          <h1 className="text-2xl font-bold text-gray-900">Clients</h1>
+          <p className="text-sm text-gray-500 mt-1">
             Client → job site → project. Contacts attach at the level they belong to.
           </p>
         </div>
@@ -145,23 +145,23 @@ export default function ClientList() {
       {banner && (
         <div className={
           'mt-4 px-4 py-3 rounded text-sm ' +
-          (banner.kind === 'error' ? 'bg-red-900/40 text-red-200 border border-red-700'
-            : banner.kind === 'warn' ? 'bg-amber-900/30 text-amber-200 border border-amber-700'
-            : 'bg-blue-900/30 text-blue-200 border border-blue-800')
+          (banner.kind === 'error' ? 'bg-red-50 text-red-700 border border-red-200'
+            : banner.kind === 'warn' ? 'bg-amber-50 text-amber-800 border border-amber-200'
+            : 'bg-blue-50 text-blue-800 border border-blue-200')
         }>
           {banner.text}
         </div>
       )}
 
       {isAdmin && unprovisioned > 0 && (
-        <div className="mt-4 px-4 py-3 rounded bg-amber-900/30 border border-amber-700 text-amber-200 text-sm flex items-center justify-between gap-4">
+        <div className="mt-4 px-4 py-3 rounded bg-amber-50 border border-amber-200 text-amber-800 text-sm flex items-center justify-between gap-4">
           <span className="flex items-center gap-2">
             <AlertTriangle size={16} />
             {unprovisioned} client{unprovisioned === 1 ? '' : 's'} without a SharePoint folder.
           </span>
           <button
             onClick={runBackfill}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded bg-amber-700 hover:bg-amber-600 text-white text-xs font-medium"
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded bg-amber-600 hover:bg-amber-700 text-white text-xs font-medium"
           >
             <FolderPlus size={14} /> Create folders
           </button>
@@ -176,13 +176,13 @@ export default function ClientList() {
             key={k}
             onClick={() => setTab(k)}
             className={'px-3 py-1.5 rounded-full text-sm font-medium ' +
-              (tab === k ? 'bg-orange-600 text-white' : 'bg-ink-800 text-ink-300 hover:bg-ink-700')}
+              (tab === k ? 'bg-orange-600 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200')}
           >
             {label}
           </button>
         ))}
         <div className="relative ml-auto w-full sm:w-72">
-          <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-ink-500" />
+          <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
           <input
             className="input w-full pl-9 text-gray-900 bg-white"
             placeholder="Search by company name…"
@@ -193,48 +193,48 @@ export default function ClientList() {
       </div>
 
       {loading ? (
-        <div className="text-ink-400 text-sm py-10 text-center">Loading clients…</div>
+        <div className="text-gray-500 text-sm py-10 text-center">Loading clients…</div>
       ) : err ? (
         <div className="text-red-300 text-sm py-10 text-center">{err}</div>
       ) : shown.length === 0 ? (
-        <div className="text-ink-400 text-sm py-12 text-center border border-ink-800 rounded">
+        <div className="text-gray-500 text-sm py-12 text-center border border-gray-200 rounded">
           {clients.length === 0
             ? 'No clients yet. The QuickBooks import will load these on cutover.'
             : 'Nothing matches that search.'}
         </div>
       ) : (
-        <div className="border border-ink-800 rounded divide-y divide-ink-800">
+        <div className="border border-gray-200 rounded divide-y divide-gray-200">
           {shown.map(c => (
             <Link
               key={c.id}
               to={`/clients/${c.id}`}
-              className="flex items-center gap-4 px-4 py-3 hover:bg-ink-800/50"
+              className="flex items-center gap-4 px-4 py-3 hover:bg-gray-50"
             >
-              <Building2 size={18} className="text-ink-500 shrink-0" />
+              <Building2 size={18} className="text-gray-400 shrink-0" />
               <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-2 flex-wrap">
-                  <span className="font-medium text-ink-100 truncate">{c.name}</span>
+                  <span className="font-medium text-gray-900 truncate">{c.name}</span>
                   <span className={
                     'text-[10px] px-1.5 py-0.5 rounded font-medium tracking-wide ' +
                     (c.relationship_status === 'client'
-                      ? 'bg-green-900/50 text-green-300'
-                      : 'bg-ink-700 text-ink-300')
+                      ? 'bg-green-50 text-green-700 border border-green-200'
+                      : 'bg-gray-100 text-gray-600')
                   }>
                     {c.relationship_status === 'client' ? 'CLIENT' : 'PROSPECT'}
                   </span>
                   {!c.sharepoint_folder_id && (
-                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-900/50 text-amber-300">
+                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-50 text-amber-700 border border-amber-200">
                       NO FOLDER
                     </span>
                   )}
                 </div>
-                <div className="text-xs text-ink-400 truncate mt-0.5">
+                <div className="text-xs text-gray-500 truncate mt-0.5">
                   {labelFor(CLIENT_TYPES, c.client_type)}
                   {c.address_line1 ? ` · ${c.address_line1}` : ''}
                   {c.city ? `, ${c.city}` : ''}
                 </div>
               </div>
-              <span className="text-xs text-ink-500 shrink-0">
+              <span className="text-xs text-gray-400 shrink-0">
                 {counts[c.id] ?? 0} site{(counts[c.id] ?? 0) === 1 ? '' : 's'}
               </span>
             </Link>
@@ -245,15 +245,15 @@ export default function ClientList() {
       {/* ---- New client modal ---- */}
       {showNew && (
         <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4">
-          <div className="bg-ink-900 border border-ink-700 rounded-lg w-full max-w-xl max-h-[90vh] overflow-y-auto">
-            <div className="flex items-center justify-between px-5 py-4 border-b border-ink-800">
-              <h2 className="text-lg font-semibold text-ink-100">New Client</h2>
-              <button onClick={() => setShowNew(false)} className="text-ink-400 hover:text-ink-200">✕</button>
+          <div className="bg-white border border-gray-200 rounded-lg w-full max-w-xl max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between px-5 py-4 border-b border-gray-200">
+              <h2 className="text-lg font-semibold text-gray-900">New Client</h2>
+              <button onClick={() => setShowNew(false)} className="text-gray-500 hover:text-gray-700">✕</button>
             </div>
 
             <div className="p-5 space-y-4">
               {spHealth && !spHealth.ok && (
-                <div className="px-3 py-2 rounded bg-amber-900/30 border border-amber-700 text-amber-200 text-xs">
+                <div className="px-3 py-2 rounded bg-amber-50 border border-amber-200 text-amber-800 text-xs">
                   SharePoint is unavailable right now. You can still save — the folder
                   will be created when it is back, using “Create folders”.
                 </div>
@@ -321,15 +321,15 @@ export default function ClientList() {
                   value={form.website} onChange={e => setForm({ ...form, website: e.target.value })} />
               </Field>
 
-              <div className="px-3 py-2 rounded bg-blue-900/25 border border-blue-800 text-blue-200 text-xs">
+              <div className="px-3 py-2 rounded bg-blue-50 border border-blue-200 text-blue-800 text-xs">
                 New companies start as prospects and promote automatically on the first won bid.
                 Job sites and contacts are added on the client page once this is saved.
               </div>
             </div>
 
-            <div className="flex justify-end gap-2 px-5 py-4 border-t border-ink-800">
+            <div className="flex justify-end gap-2 px-5 py-4 border-t border-gray-200">
               <button onClick={() => setShowNew(false)}
-                className="px-4 py-2 rounded text-sm text-ink-300 hover:text-ink-100">Cancel</button>
+                className="px-4 py-2 rounded text-sm text-gray-600 hover:text-gray-900">Cancel</button>
               <button onClick={submit} disabled={saving}
                 className="px-4 py-2 rounded bg-orange-600 hover:bg-orange-700 disabled:opacity-50 text-white text-sm font-medium">
                 {saving ? 'Saving…' : 'Create Client'}
@@ -345,7 +345,7 @@ export default function ClientList() {
 function Field({ label, children }) {
   return (
     <label className="block">
-      <span className="block text-xs uppercase tracking-wide text-ink-400 mb-1">{label}</span>
+      <span className="block text-xs uppercase tracking-wide text-gray-500 mb-1">{label}</span>
       {children}
     </label>
   )

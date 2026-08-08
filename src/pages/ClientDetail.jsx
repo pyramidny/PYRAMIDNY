@@ -93,19 +93,19 @@ export default function ClientDetail() {
     } catch (e) { setBanner({ kind: 'error', text: e.message }) }
   }
 
-  if (loading) return <div className="p-6 text-ink-400 text-sm">Loading…</div>
-  if (!client) return <div className="p-6 text-ink-400 text-sm">Client not found.</div>
+  if (loading) return <div className="p-6 text-gray-500 text-sm">Loading…</div>
+  if (!client) return <div className="p-6 text-gray-500 text-sm">Client not found.</div>
 
   return (
     <div className="p-6 max-w-5xl mx-auto">
-      <Link to="/clients" className="inline-flex items-center gap-1.5 text-sm text-ink-400 hover:text-ink-200 mb-4">
+      <Link to="/clients" className="inline-flex items-center gap-1.5 text-sm text-gray-500 hover:text-gray-700 mb-4">
         <ArrowLeft size={15} /> Clients
       </Link>
 
       <div className="flex items-start justify-between gap-4 flex-wrap">
         <div>
-          <h1 className="text-2xl font-bold text-ink-100">{client.name}</h1>
-          <p className="text-sm text-ink-400 mt-1">
+          <h1 className="text-2xl font-bold text-gray-900">{client.name}</h1>
+          <p className="text-sm text-gray-500 mt-1">
             {labelFor(CLIENT_TYPES, client.client_type)}
             {client.address_line1 ? ` · ${client.address_line1}` : ''}
             {client.city ? `, ${client.city}` : ''}
@@ -115,18 +115,18 @@ export default function ClientDetail() {
             <span className={
               'text-[10px] px-2 py-0.5 rounded font-medium tracking-wide ' +
               (client.relationship_status === 'client'
-                ? 'bg-green-900/50 text-green-300' : 'bg-ink-700 text-ink-300')
+                ? 'bg-green-50 text-green-700 border border-green-200' : 'bg-gray-100 text-gray-600')
             }>
               {client.relationship_status === 'client' ? 'CLIENT' : 'PROSPECT'}
             </span>
             {client.qb_customer_name && (
-              <span className="text-[10px] px-2 py-0.5 rounded bg-blue-900/40 text-blue-300">
+              <span className="text-[10px] px-2 py-0.5 rounded bg-blue-50 text-blue-700 border border-blue-200">
                 QB: {client.qb_customer_name}
               </span>
             )}
             {client.sharepoint_folder_url && (
               <a href={client.sharepoint_folder_url} target="_blank" rel="noreferrer"
-                className="text-[10px] px-2 py-0.5 rounded bg-ink-700 text-ink-300 hover:text-ink-100 inline-flex items-center gap-1">
+                className="text-[10px] px-2 py-0.5 rounded bg-gray-100 text-gray-600 hover:text-gray-900 inline-flex items-center gap-1">
                 SharePoint <ExternalLink size={10} />
               </a>
             )}
@@ -135,7 +135,7 @@ export default function ClientDetail() {
         <div className="flex gap-2">
           {canDo('edit_client') && (
             <button onClick={togglePromote}
-              className="px-3 py-2 rounded border border-ink-700 text-ink-300 hover:text-ink-100 text-sm">
+              className="px-3 py-2 rounded border border-gray-200 text-gray-600 hover:text-gray-900 text-sm">
               {client.relationship_status === 'client' ? 'Mark as Prospect' : 'Promote to Client'}
             </button>
           )}
@@ -150,8 +150,8 @@ export default function ClientDetail() {
 
       {banner && (
         <div className={'mt-4 px-4 py-3 rounded text-sm ' +
-          (banner.kind === 'error' ? 'bg-red-900/40 text-red-200 border border-red-700'
-            : 'bg-amber-900/30 text-amber-200 border border-amber-700')}>
+          (banner.kind === 'error' ? 'bg-red-50 text-red-700 border border-red-200'
+            : 'bg-amber-50 text-amber-800 border border-amber-200')}>
           {banner.text}
         </div>
       )}
@@ -163,7 +163,7 @@ export default function ClientDetail() {
           <button onClick={() => setContactForm({
             first_name: '', last_name: '', title: '', email: '',
             phone: '', mobile: '', contact_type: 'primary', is_billing_contact: false,
-          })} className="text-xs px-3 py-1.5 rounded bg-ink-700 hover:bg-ink-600 text-ink-100">
+          })} className="text-xs px-3 py-1.5 rounded bg-gray-100 hover:bg-gray-200 text-gray-900">
             + Contact
           </button>
         )}
@@ -171,17 +171,17 @@ export default function ClientDetail() {
         {contacts.length === 0 ? (
           <Empty>No contacts yet.</Empty>
         ) : contacts.map(ct => (
-          <div key={ct.id} className="px-4 py-3 border-t border-ink-800 first:border-t-0">
+          <div key={ct.id} className="px-4 py-3 border-t border-gray-200 first:border-t-0">
             <div className="flex items-center gap-2 flex-wrap">
-              <User size={14} className="text-ink-500" />
-              <span className="font-medium text-ink-100">{ct.full_name || '—'}</span>
+              <User size={14} className="text-gray-400" />
+              <span className="font-medium text-gray-900">{ct.full_name || '—'}</span>
               {ct.is_billing_contact && (
-                <span className="text-[10px] px-1.5 py-0.5 rounded bg-green-900/50 text-green-300">
+                <span className="text-[10px] px-1.5 py-0.5 rounded bg-green-50 text-green-700 border border-green-200">
                   RECEIVES INVOICES
                 </span>
               )}
             </div>
-            <div className="text-xs text-ink-400 mt-0.5 pl-5">
+            <div className="text-xs text-gray-500 mt-0.5 pl-5">
               {[ct.title, ct.email, ct.phone, ct.mobile && `Cell ${ct.mobile}`]
                 .filter(Boolean).join(' · ') || labelFor(CONTACT_TYPES, ct.contact_type)}
             </div>
@@ -197,16 +197,16 @@ export default function ClientDetail() {
           const n = projects.filter(p => p.site_id === s.id).length
           return (
             <Link key={s.id} to={`/sites/${s.id}`}
-              className="flex items-center gap-3 px-4 py-3 border-t border-ink-800 first:border-t-0 hover:bg-ink-800/50">
-              <MapPin size={15} className="text-ink-500 shrink-0" />
+              className="flex items-center gap-3 px-4 py-3 border-t border-gray-200 first:border-t-0 hover:bg-gray-50">
+              <MapPin size={15} className="text-gray-400 shrink-0" />
               <div className="min-w-0 flex-1">
-                <div className="font-medium text-ink-100 truncate">{s.name}</div>
-                <div className="text-xs text-ink-400 truncate">
+                <div className="font-medium text-gray-900 truncate">{s.name}</div>
+                <div className="text-xs text-gray-500 truncate">
                   {[s.address_line1, s.borough, s.bin_number && `BIN ${s.bin_number}`]
                     .filter(Boolean).join(' · ') || '—'}
                 </div>
               </div>
-              <span className="text-xs text-ink-500 shrink-0">{n} project{n === 1 ? '' : 's'}</span>
+              <span className="text-xs text-gray-400 shrink-0">{n} project{n === 1 ? '' : 's'}</span>
             </Link>
           )
         })}
@@ -218,14 +218,14 @@ export default function ClientDetail() {
           <Empty>No projects at this client yet.</Empty>
         ) : projects.map(p => (
           <Link key={p.id} to={`/projects/${p.id}`}
-            className="flex items-center gap-3 px-4 py-3 border-t border-ink-800 first:border-t-0 hover:bg-ink-800/50">
-            <Building2 size={15} className="text-ink-500 shrink-0" />
+            className="flex items-center gap-3 px-4 py-3 border-t border-gray-200 first:border-t-0 hover:bg-gray-50">
+            <Building2 size={15} className="text-gray-400 shrink-0" />
             <span className="font-mono text-xs text-blue-300 shrink-0">{p.project_number}</span>
             <div className="min-w-0 flex-1">
-              <div className="text-ink-100 truncate text-sm">{p.project_address}</div>
-              <div className="text-xs text-ink-400">{p.scope_type ?? '—'}</div>
+              <div className="text-gray-900 truncate text-sm">{p.project_address}</div>
+              <div className="text-xs text-gray-500">{p.scope_type ?? '—'}</div>
             </div>
-            <span className="text-xs text-ink-500 shrink-0">Stage {p.current_stage} · {p.status}</span>
+            <span className="text-xs text-gray-400 shrink-0">Stage {p.current_stage} · {p.status}</span>
           </Link>
         ))}
       </Section>
@@ -264,7 +264,7 @@ export default function ClientDetail() {
               value={siteForm.phone}
               onChange={e => setSiteForm({ ...siteForm, phone: e.target.value })} />
           </Field>
-          <p className="text-xs text-ink-400">
+          <p className="text-xs text-gray-500">
             Site names only need to be unique within this client — the same address can
             exist under another management company.
           </p>
@@ -315,7 +315,7 @@ export default function ClientDetail() {
                 onChange={e => setContactForm({ ...contactForm, mobile: e.target.value })} />
             </Field>
           </div>
-          <label className="flex items-center gap-2 text-sm text-ink-200">
+          <label className="flex items-center gap-2 text-sm text-gray-700">
             <input type="checkbox" checked={contactForm.is_billing_contact}
               onChange={e => setContactForm({ ...contactForm, is_billing_contact: e.target.checked })} />
             Receives invoices
@@ -331,19 +331,19 @@ function Section({ title, action, children }) {
   return (
     <div className="mt-6">
       <div className="flex items-center justify-between mb-2">
-        <h2 className="text-xs uppercase tracking-wider text-ink-400 font-semibold">{title}</h2>
+        <h2 className="text-xs uppercase tracking-wider text-gray-500 font-semibold">{title}</h2>
         {action}
       </div>
-      <div className="border border-ink-800 rounded overflow-hidden">{children}</div>
+      <div className="border border-gray-200 rounded overflow-hidden">{children}</div>
     </div>
   )
 }
-const Empty = ({ children }) => <div className="px-4 py-6 text-sm text-ink-500">{children}</div>
+const Empty = ({ children }) => <div className="px-4 py-6 text-sm text-gray-400">{children}</div>
 
 function Field({ label, children }) {
   return (
     <label className="block">
-      <span className="block text-xs uppercase tracking-wide text-ink-400 mb-1">{label}</span>
+      <span className="block text-xs uppercase tracking-wide text-gray-500 mb-1">{label}</span>
       {children}
     </label>
   )
@@ -352,14 +352,14 @@ function Field({ label, children }) {
 function Modal({ title, onClose, onSave, saveLabel, children }) {
   return (
     <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4">
-      <div className="bg-ink-900 border border-ink-700 rounded-lg w-full max-w-lg max-h-[90vh] overflow-y-auto">
-        <div className="flex items-center justify-between px-5 py-4 border-b border-ink-800">
-          <h2 className="text-lg font-semibold text-ink-100">{title}</h2>
-          <button onClick={onClose} className="text-ink-400 hover:text-ink-200">✕</button>
+      <div className="bg-white border border-gray-200 rounded-lg w-full max-w-lg max-h-[90vh] overflow-y-auto">
+        <div className="flex items-center justify-between px-5 py-4 border-b border-gray-200">
+          <h2 className="text-lg font-semibold text-gray-900">{title}</h2>
+          <button onClick={onClose} className="text-gray-500 hover:text-gray-700">✕</button>
         </div>
         <div className="p-5 space-y-4">{children}</div>
-        <div className="flex justify-end gap-2 px-5 py-4 border-t border-ink-800">
-          <button onClick={onClose} className="px-4 py-2 rounded text-sm text-ink-300 hover:text-ink-100">Cancel</button>
+        <div className="flex justify-end gap-2 px-5 py-4 border-t border-gray-200">
+          <button onClick={onClose} className="px-4 py-2 rounded text-sm text-gray-600 hover:text-gray-900">Cancel</button>
           <button onClick={onSave}
             className="px-4 py-2 rounded bg-orange-600 hover:bg-orange-700 text-white text-sm font-medium">
             {saveLabel}
