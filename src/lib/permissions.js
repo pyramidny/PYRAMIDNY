@@ -77,6 +77,7 @@ export function can(action, role) {
   return allowed.includes(role)
 }
 
+import { useCallback } from 'react'
 import { useAuth } from '@/context/AuthContext'
 
 /**
@@ -89,7 +90,11 @@ import { useAuth } from '@/context/AuthContext'
 export function useCanDo() {
   const { profile } = useAuth()
   const role = profile?.role
-  return (action) => can(action, role)
+  // MUST be memoised on `role`. Returning a fresh arrow each render makes this
+  // unsafe in any useEffect/useCallback dependency array — the identity changes
+  // every render, the effect re-fires, state updates, and you get an infinite
+  // render loop that hammers the API until the browser runs out of sockets.
+  return useCallback((action) => can(action, role), [role])
 }
 
 /**

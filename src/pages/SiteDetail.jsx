@@ -15,7 +15,7 @@ import { useEffect, useState, useCallback } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { ArrowLeft, Plus, User, Building2, ExternalLink, MoveRight } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
-import { useCanDo } from '@/lib/permissions'
+import { useCanDo, useIsAdmin } from '@/lib/permissions'
 import {
   createContact, addSiteContact, removeSiteContact, moveSite,
   CONTACT_TYPES, labelFor,
@@ -24,6 +24,7 @@ import {
 export default function SiteDetail() {
   const { id } = useParams()
   const canDo = useCanDo()
+  const isAdmin = useIsAdmin()   // plain boolean — safe in dep arrays
 
   const [site, setSite] = useState(null)
   const [client, setClient] = useState(null)
@@ -77,7 +78,7 @@ export default function SiteDetail() {
         .eq('site_id', id).order('project_number', { ascending: false })
       setProjects(ps ?? [])
 
-      if (canDo('move_site')) {
+      if (isAdmin) {
         const { data: cl } = await supabase.from('clients')
           .select('id, name').eq('is_active', true).order('name')
         setAllClients(cl ?? [])
@@ -85,7 +86,7 @@ export default function SiteDetail() {
     } finally {
       setLoading(false)
     }
-  }, [id, canDo])
+  }, [id, isAdmin])
 
   useEffect(() => { load() }, [load])
 
