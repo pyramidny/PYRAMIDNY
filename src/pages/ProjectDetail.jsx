@@ -553,7 +553,7 @@ export default function ProjectDetail() {
               <p className="text-xs text-gray-400 uppercase tracking-wide">Workflow Stage</p>
               <p className="text-xs font-medium text-gray-500">
                 {stageLabelOf(project.current_stage)
-                  ? `${stageLabelOf(project.current_stage)} \u00b7 Stage ${project.current_stage} of ${maxStage}`
+                  ? `${stageLabelOf(project.current_stage)} · Stage ${project.current_stage} of ${maxStage}`
                   : `Stage ${project.current_stage ?? '-'}`}
               </p>
             </div>
@@ -593,23 +593,23 @@ export default function ProjectDetail() {
                     title="Go back a stage. This moves the stage marker only — it does not undo or reopen completed tasks."
                     className="px-3 py-1.5 text-sm rounded border border-gray-300 text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed"
                   >
-                    \u2190 Back
+                    ← Back
                   </button>
                   <button
                     onClick={() => changeStage((project.current_stage ?? 1) + 1)}
                     disabled={stageBusy || (project.current_stage ?? 1) >= maxStage}
                     className="px-3 py-1.5 text-sm rounded bg-pyramid-600 text-white hover:bg-pyramid-700 disabled:opacity-40 disabled:cursor-not-allowed"
                   >
-                    Advance \u2192
+                    Advance →
                   </button>
                   <button
                     onClick={() => openStageModal(project.current_stage ?? 1)}
                     disabled={stageBusy}
                     className="px-3 py-1.5 text-sm rounded border border-gray-300 text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-40"
                   >
-                    Set stage\u2026
+                    Set stage…
                   </button>
-                  {stageBusy && <span className="text-xs text-gray-400">Saving\u2026</span>}
+                  {stageBusy && <span className="text-xs text-gray-400">Saving…</span>}
                 </div>
                 <p className="text-[11px] text-gray-400 mt-2">
                   Back moves the stage marker only — it never reopens or deletes completed tasks. Stage 3 (Awarded) and later require a linked client and job site.
@@ -671,7 +671,7 @@ export default function ProjectDetail() {
                       disabled={stageBusy || stageTarget == null || stageTarget === project.current_stage}
                       className="px-3 py-1.5 text-sm rounded bg-pyramid-600 text-white hover:bg-pyramid-700 disabled:opacity-40 disabled:cursor-not-allowed"
                     >
-                      {stageBusy ? 'Saving\u2026' : 'Confirm'}
+                      {stageBusy ? 'Saving…' : 'Confirm'}
                     </button>
                   </div>
                 </div>
@@ -709,7 +709,7 @@ export default function ProjectDetail() {
               <p className="text-sm text-gray-500">
                 No client or job site linked yet.{' '}
                 <a href="/clients" className="text-blue-600 hover:text-blue-800">Add one under Clients</a>
-                {' '}\u2014 required before this job can be marked awarded.
+                {' '}— required before this job can be marked awarded.
               </p>
             ) : (
               <div className="space-y-3">
@@ -726,7 +726,7 @@ export default function ProjectDetail() {
                           </span>
                         )}
                       </a>
-                    ) : <p className="text-sm text-gray-500">\u2014</p>}
+                    ) : <p className="text-sm text-gray-500">—</p>}
                   </div>
                   <div>
                     <p className="text-xs text-gray-400 block mb-1">Job Site</p>
@@ -739,10 +739,10 @@ export default function ProjectDetail() {
                         <p className="text-xs text-gray-400 mt-0.5">
                           {[siteInfo.address_line1, siteInfo.borough,
                             siteInfo.bin_number && `BIN ${siteInfo.bin_number}`]
-                            .filter(Boolean).join(' \u00b7 ')}
+                            .filter(Boolean).join(' · ')}
                         </p>
                       </>
-                    ) : <p className="text-sm text-gray-500">\u2014</p>}
+                    ) : <p className="text-sm text-gray-500">—</p>}
                   </div>
                 </div>
 
@@ -760,7 +760,7 @@ export default function ProjectDetail() {
                           )}
                           <p className="text-xs text-gray-400">
                             {[ct.title, ct.email, ct.phone, ct.mobile && `Cell ${ct.mobile}`]
-                              .filter(Boolean).join(' \u00b7 ')}
+                              .filter(Boolean).join(' · ')}
                           </p>
                         </div>
                       ))}
