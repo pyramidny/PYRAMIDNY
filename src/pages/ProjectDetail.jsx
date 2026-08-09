@@ -7,12 +7,22 @@ import { useCanDo, useIsAdmin } from '@/lib/permissions'
 const PROXY_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/project-proxy`
 const SP_TOKEN_KEY = 'sb-izjaxmcdlsdkdliqjlei-auth-token'
 
-const STATUS_COLORS = {
-  active: 'bg-green-100 text-green-800',
-  pending: 'bg-yellow-100 text-yellow-800',
-  complete: 'bg-blue-100 text-blue-800',
-  on_hold: 'bg-gray-100 text-gray-700',
-  cancelled: 'bg-red-100 text-red-700',
+// project_status enum — the real 7 values, in ProjectList / NewProject order.
+const STATUS_VALUES = [
+  'New Bid', 'Active Bid', 'No Bid', 'Bid Not Awarded',
+  'Job Awarded', 'Active Job', 'Job Closed',
+]
+
+// Pill colors keyed to the real enum values (mirrors ProjectList's STATUS_STYLES).
+// The old lowercase STATUS_COLORS map was stale/generic and never matched these.
+const STATUS_STYLES = {
+  'New Bid':         'bg-gray-100 text-gray-700',
+  'Active Bid':      'bg-blue-100 text-blue-800',
+  'No Bid':          'bg-gray-100 text-gray-500',
+  'Bid Not Awarded': 'bg-red-100 text-red-700',
+  'Job Awarded':     'bg-amber-100 text-amber-800',
+  'Active Job':      'bg-green-100 text-green-800',
+  'Job Closed':      'bg-slate-200 text-slate-700',
 }
 
 // milestone_value enum in DB: Yes | No | Missing | N/A
@@ -170,6 +180,12 @@ export default function ProjectDetail() {
   const [stageError, setStageError] = useState(null)
   const [showStageModal, setShowStageModal] = useState(false)
   const [stageTarget, setStageTarget] = useState(null)
+
+  // Admin status dropdown + folder-setup (backfill) state
+  const [statusSaving, setStatusSaving] = useState(false)
+  const [statusError, setStatusError] = useState(null)
+  const [folderBusy, setFolderBusy] = useState(false)
+  const [folderMsg, setFolderMsg] = useState(null)
 
   // Milestone inline edit state: { [milestoneId]: { value, milestone_date, notes } }
   const [msDraft, setMsDraft] = useState({})
@@ -361,6 +377,71 @@ export default function ProjectDetail() {
     }
   }
 
+  // Admin status change — writes the project_status enum through the same
+  // generic `update` proxy action the timeline uses (admin-enforced server-side).
+  // Optimistic with revert. Gated in the UI by canDo('update_project_status').
+  const saveStatus = async (newStatus) => {
+    if (!newStatus || newStatus === project.status) return
+    const prev = project.status
+    setStatusError(null)
+    setStatusSaving(true)
+    setProject(p => ({ ...p, status: newStatus }))          // optimistic
+    try {
+      const updated = await proxy({ action: 'update', projectId: id, updates: { status: newStatus } })
+      setProject(p => ({ ...p, status: updated?.status ?? newStatus }))
+    } catch (e) {
+      setProject(p => ({ ...p, status: prev }))             // revert
+      setStatusError(e.message)
+    } finally {
+      setStatusSaving(false)
+    }
+  }
+
+  // Provision the SharePoint folder tree for a project that has none
+  // (sharepoint_folder_id IS NULL). Server-side, app-only Graph auth — the
+  // frontend sends no token; the handler mints its own via getGraphToken().
+  //
+  // NOTE: backfill_project also seeds workflow tasks + a project_production row
+  // (both idempotent, skip-if-present) — so it's aimed at active jobs being
+  // adopted, not historical Job Closed imports.
+  //
+  // Return gotcha: the handler's `data` is the project row read BEFORE the
+  // SharePoint write, so data.sharepoint_folder_id is still null even on
+  // success. Success comes from `meta.sp_created`; we then re-fetch the row for
+  // the authoritative folder id, which is what hides the button.
+  const setupFolder = async () => {
+    setFolderBusy(true)
+    setFolderMsg(null)
+    try {
+      const accessToken = getAccessToken()
+      const res = await fetch(PROXY_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken}` },
+        body: JSON.stringify({ action: 'backfill_project', projectId: id }),
+      })
+      const json = await res.json()
+      if (!res.ok) throw new Error(json.error ?? `Proxy error ${res.status}`)
+
+      const created = json?.meta?.sp_created === true
+      const subs = json?.meta?.sp_subfolders
+
+      // Authoritative re-read — the handler's `data` is pre-update.
+      const { data: fresh } = await supabase
+        .from('projects').select('*').eq('id', id).single()
+      if (fresh) setProject(fresh)
+
+      if (created || fresh?.sharepoint_folder_id) {
+        setFolderMsg({ ok: true, text: `Folder created${subs ? ` · ${subs} subfolders` : ''}. Workflow tasks seeded.` })
+      } else {
+        setFolderMsg({ ok: false, text: 'Folder setup did not complete (SharePoint returned no folder). Try again.' })
+      }
+    } catch (e) {
+      setFolderMsg({ ok: false, text: e.message })
+    } finally {
+      setFolderBusy(false)
+    }
+  }
+
   const setTaskStatus = async (task, newStatus) => {
     if (task.status === newStatus) return
     const prev = task.status
@@ -542,7 +623,7 @@ export default function ProjectDetail() {
             </p>
           )}
         </div>
-        <span className={`px-3 py-1 rounded-full text-sm font-medium ${STATUS_COLORS[project.status] ?? 'bg-gray-100 text-gray-700'}`}>
+        <span className={`px-3 py-1 rounded-full text-sm font-medium ${STATUS_STYLES[project.status] ?? 'bg-gray-100 text-gray-700'}`}>
           {project.status ?? 'unknown'}
         </span>
       </div>
@@ -700,7 +781,30 @@ export default function ProjectDetail() {
 
           <div className="bg-white rounded-lg border border-gray-200 p-4">
             <p className="text-xs text-gray-400 uppercase tracking-wide mb-1">Status</p>
-            <p className="text-sm font-medium text-gray-900 capitalize">{project.status ?? '-'}</p>
+            {canDo('update_project_status') ? (
+              <>
+                <div className="flex items-center gap-2">
+                  <select
+                    value={project.status ?? ''}
+                    onChange={(e) => saveStatus(e.target.value)}
+                    disabled={statusSaving}
+                    className="text-sm border border-gray-300 rounded px-2 py-1.5 text-gray-900 bg-white disabled:opacity-50"
+                  >
+                    {/* Preserve an unknown/legacy value so it isn't silently overwritten */}
+                    {project.status && !STATUS_VALUES.includes(project.status) && (
+                      <option value={project.status} disabled>{project.status}</option>
+                    )}
+                    {STATUS_VALUES.map(s => (
+                      <option key={s} value={s}>{s}</option>
+                    ))}
+                  </select>
+                  {statusSaving && <span className="text-xs text-gray-400">Saving…</span>}
+                </div>
+                {statusError && <p className="text-xs text-red-700 mt-1">{statusError}</p>}
+              </>
+            ) : (
+              <p className="text-sm font-medium text-gray-900">{project.status ?? '-'}</p>
+            )}
           </div>
           <div className="bg-white rounded-lg border border-gray-200 p-4">
             <p className="text-xs text-gray-400 uppercase tracking-wide mb-1">Division</p>
@@ -1231,6 +1335,34 @@ export default function ProjectDetail() {
               <span className="text-xs text-gray-400">
                 {documents.filter(d => isDocCategory(d.category)).length} document{documents.filter(d => isDocCategory(d.category)).length !== 1 ? 's' : ''}
               </span>
+            </div>
+          )}
+
+          {/* No SharePoint folder yet — admin can provision it on demand.
+              backfill_project also seeds workflow tasks + a production row
+              (idempotent), so steer this to active jobs, not closed imports. */}
+          {canDo('backfill_project') && !project.sharepoint_folder_id && (
+            <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 p-3">
+              <div className="flex flex-wrap items-center gap-3">
+                <div className="min-w-0">
+                  <p className="text-sm font-medium text-amber-900">No SharePoint folder for this job yet.</p>
+                  <p className="text-xs text-amber-700">
+                    Creates the folder tree and seeds workflow tasks. Best for active jobs — skip for closed imports.
+                  </p>
+                </div>
+                <button
+                  onClick={setupFolder}
+                  disabled={folderBusy}
+                  className="ml-auto px-3 py-1.5 text-sm rounded bg-pyramid-600 text-white hover:bg-pyramid-700 disabled:opacity-40 disabled:cursor-not-allowed"
+                >
+                  {folderBusy ? 'Setting up…' : 'Set up job folder'}
+                </button>
+              </div>
+              {folderMsg && (
+                <p className={`text-xs mt-2 ${folderMsg.ok ? 'text-green-700' : 'text-red-700'}`}>
+                  {folderMsg.text}
+                </p>
+              )}
             </div>
           )}
 
