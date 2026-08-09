@@ -522,6 +522,25 @@ export default function ProjectDetail() {
             {project.project_address ?? 'Untitled Project'}
           </h1>
           <p className="text-ink-500 text-sm mt-1">#{project.project_number}</p>
+          {/* Archive folder — set by the number-reconciliation backfill. A real
+              SharePoint URL is a clickable link; a file-server path is shown as
+              copyable text (browsers can't open file:// paths). */}
+          {project.archive_folder_url && (
+            <a
+              href={project.archive_folder_url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1 text-sm text-blue-600 hover:text-blue-800 mt-1"
+            >
+              Open archive folder ↗
+            </a>
+          )}
+          {!project.archive_folder_url && project.imported_from_path && (
+            <p className="text-xs text-gray-400 mt-1">
+              Archive (file server):{' '}
+              <span className="font-mono text-gray-500">{project.imported_from_path}</span>
+            </p>
+          )}
         </div>
         <span className={`px-3 py-1 rounded-full text-sm font-medium ${STATUS_COLORS[project.status] ?? 'bg-gray-100 text-gray-700'}`}>
           {project.status ?? 'unknown'}
