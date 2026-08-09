@@ -20,11 +20,6 @@ const STATUS_STYLES = {
   'Job Closed':      'bg-ink-100 text-ink-500',
 }
 
-const STAGE_LABELS = {
-  1: 'Bidding', 2: 'Interview', 3: 'Awarded',
-  4: 'Transfer', 5: 'Active', 6: 'Closeout'
-}
-
 export function ProjectList() {
   const { division: userDivision } = useAuth()
   const canDo = useCanDo()
@@ -33,6 +28,7 @@ export function ProjectList() {
   const [loading, setLoading]     = useState(true)
   const [search, setSearch]       = useState('')
   const [statusFilter, setStatusFilter] = useState('all')
+  const [stageLabels, setStageLabels] = useState({})
 
   // Division tab: use URL param if elevated, else lock to user's division
   const location     = useLocation()
@@ -40,6 +36,17 @@ export function ProjectList() {
   const activeDivision = userDivision ?? divisionParam ?? 'regular'
 
   useEffect(() => { fetchProjects() }, [activeDivision, statusFilter, location.key])
+
+  // Stage labels come from the DB `stages` table so this list and ProjectDetail
+  // share one source of truth (renamable without a deploy).
+  useEffect(() => {
+    supabase.from('stages').select('stage_number, label').eq('is_active', true)
+      .then(({ data }) => {
+        const map = {}
+        for (const s of (data || [])) map[s.stage_number] = s.label
+        setStageLabels(map)
+      })
+  }, [])
 
   async function fetchProjects() {
     setLoading(true)
@@ -176,7 +183,7 @@ export function ProjectList() {
             </thead>
             <tbody className="bg-white divide-y divide-ink-100">
               {filtered.map(project => (
-                <ProjectRow key={project.id} project={project} />
+                <ProjectRow key={project.id} project={project} stageLabels={stageLabels} />
               ))}
             </tbody>
           </table>
@@ -193,7 +200,7 @@ export function ProjectList() {
   )
 }
 
-function ProjectRow({ project }) {
+function ProjectRow({ project, stageLabels = {} }) {
   const pm = project.pm?.display_name ?? project.pm?.full_name?.split(' ')[0] ?? '—'
   const amount = project.job_amount_contracted ?? project.bid_amount
   const isRegular = project.division === 'regular'
@@ -239,7 +246,7 @@ function ProjectRow({ project }) {
             {project.current_stage}
           </span>
           <span className="text-ink-500 text-xs">
-            {STAGE_LABELS[project.current_stage]}
+            {stageLabels[project.current_stage] ?? ''}
           </span>
         </div>
       </td>

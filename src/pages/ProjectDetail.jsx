@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useMemo } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/context/AuthContext'
-import { useCanDo } from '@/lib/permissions'
+import { useCanDo, useIsAdmin } from '@/lib/permissions'
 
 const PROXY_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/project-proxy`
 const SP_TOKEN_KEY = 'sb-izjaxmcdlsdkdliqjlei-auth-token'
@@ -144,6 +144,7 @@ export default function ProjectDetail() {
   const navigate = useNavigate()
   const { session, profile } = useAuth()
   const canDo = useCanDo()
+  const isAdmin = useIsAdmin()
 
   const [project, setProject] = useState(null)
   const [milestones, setMilestones] = useState([])
@@ -162,6 +163,13 @@ export default function ProjectDetail() {
   const [teamDraft, setTeamDraft] = useState({ pm_id: null, assistant_pm_id: null })
   const [editingDates, setEditingDates] = useState(false)
   const [dateDraft, setDateDraft] = useState({ due_date: '', start_date: '', reminder_date: '' })
+
+  // Workflow stage control (bar reads DB `stages`; writes go through project-proxy)
+  const [stages, setStages] = useState([])
+  const [stageBusy, setStageBusy] = useState(false)
+  const [stageError, setStageError] = useState(null)
+  const [showStageModal, setShowStageModal] = useState(false)
+  const [stageTarget, setStageTarget] = useState(null)
 
   // Milestone inline edit state: { [milestoneId]: { value, milestone_date, notes } }
   const [msDraft, setMsDraft] = useState({})
@@ -288,6 +296,46 @@ export default function ProjectDetail() {
       .then(({ data }) => setStaffPool(data || []))
   }, [])
 
+  // Stage label table — DB-driven so wording changes need no deploy. RLS allows
+  // authenticated SELECT, so read it directly like the other lookups.
+  useEffect(() => {
+    supabase.from('stages').select('*').eq('is_active', true).order('stage_number')
+      .then(({ data }) => setStages(data || []))
+  }, [])
+
+  const maxStage = stages.length ? Math.max(...stages.map(s => s.stage_number)) : 6
+  const stageLabelOf = (n) => stages.find(s => s.stage_number === n)?.label ?? null
+
+  const openStageModal = (target) => {
+    setStageError(null)
+    setStageTarget(target)
+    setShowStageModal(true)
+  }
+
+  // ONE path for Advance / Back / Set-stage so the DB award gate (Stage 3+
+  // requires a linked client + site) fires identically and its 400 surfaces on
+  // the control. Not optimistic — the gate can legitimately reject a jump.
+  const changeStage = async (target) => {
+    if (target == null || target < 1 || target > maxStage) return
+    setStageBusy(true)
+    setStageError(null)
+    try {
+      const updated = await proxy({ action: 'update', projectId: id, updates: { current_stage: target } })
+      setProject(p => ({ ...p, current_stage: updated?.current_stage ?? target }))
+      // Advancing provisions the new stage's tasks server-side (insert-only,
+      // idempotent). Retreating inserts nothing and never reopens work. Reload
+      // so any newly provisioned tasks appear.
+      const { data: tsk } = await supabase.from('project_tasks')
+        .select('*').eq('project_id', id).order('created_at')
+      if (tsk) setTasks(tsk)
+      setShowStageModal(false)
+    } catch (e) {
+      setStageError(e.message)
+    } finally {
+      setStageBusy(false)
+    }
+  }
+
   const saveTeamAssignment = async () => {
     try {
       await proxy({ action: 'update_project', id, ...teamDraft })
@@ -313,15 +361,16 @@ export default function ProjectDetail() {
     }
   }
 
-  const toggleTask = async (task) => {
-    const newStatus = task.status === 'completed' ? 'pending' : 'completed'
+  const setTaskStatus = async (task, newStatus) => {
+    if (task.status === newStatus) return
+    const prev = task.status
     // Optimistic update
     setTasks(ts => ts.map(t => t.id === task.id ? { ...t, status: newStatus } : t))
     try {
       await proxy({ action: 'update_task', taskId: task.id, updates: { status: newStatus } })
     } catch (e) {
       // Revert on failure
-      setTasks(ts => ts.map(t => t.id === task.id ? { ...t, status: task.status } : t))
+      setTasks(ts => ts.map(t => t.id === task.id ? { ...t, status: prev } : t))
       alert('Failed to save task: ' + e.message)
     }
   }
@@ -498,6 +547,138 @@ export default function ProjectDetail() {
 
       {activeTab === 'overview' && (
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          {/* Workflow stage — DB-driven bar + admin Advance / Back / Set-stage */}
+          <div className="sm:col-span-2 bg-white rounded-lg border border-gray-200 p-4">
+            <div className="flex items-center justify-between mb-3">
+              <p className="text-xs text-gray-400 uppercase tracking-wide">Workflow Stage</p>
+              <p className="text-xs font-medium text-gray-500">
+                {stageLabelOf(project.current_stage)
+                  ? `${stageLabelOf(project.current_stage)} \u00b7 Stage ${project.current_stage} of ${maxStage}`
+                  : `Stage ${project.current_stage ?? '-'}`}
+              </p>
+            </div>
+
+            {stages.length > 0 && (
+              <div className="flex gap-1">
+                {stages.map(s => {
+                  const cur = project.current_stage ?? 1
+                  const state = s.stage_number < cur ? 'done' : s.stage_number === cur ? 'current' : 'future'
+                  return (
+                    <div key={s.stage_number} className="flex-1 min-w-0">
+                      <div className={`h-1.5 rounded-full ${
+                        state === 'done' ? 'bg-pyramid-600'
+                        : state === 'current' ? 'bg-orange-500'
+                        : 'bg-gray-200'
+                      }`} />
+                      <p
+                        title={s.label}
+                        className={`mt-1 text-[10px] text-center truncate ${
+                          state === 'current' ? 'font-semibold text-orange-700' : 'text-gray-500'
+                        }`}
+                      >
+                        {s.label}
+                      </p>
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+
+            {isAdmin && (
+              <>
+                <div className="flex flex-wrap items-center gap-2 mt-4">
+                  <button
+                    onClick={() => changeStage((project.current_stage ?? 1) - 1)}
+                    disabled={stageBusy || (project.current_stage ?? 1) <= 1}
+                    title="Go back a stage. This moves the stage marker only — it does not undo or reopen completed tasks."
+                    className="px-3 py-1.5 text-sm rounded border border-gray-300 text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed"
+                  >
+                    \u2190 Back
+                  </button>
+                  <button
+                    onClick={() => changeStage((project.current_stage ?? 1) + 1)}
+                    disabled={stageBusy || (project.current_stage ?? 1) >= maxStage}
+                    className="px-3 py-1.5 text-sm rounded bg-pyramid-600 text-white hover:bg-pyramid-700 disabled:opacity-40 disabled:cursor-not-allowed"
+                  >
+                    Advance \u2192
+                  </button>
+                  <button
+                    onClick={() => openStageModal(project.current_stage ?? 1)}
+                    disabled={stageBusy}
+                    className="px-3 py-1.5 text-sm rounded border border-gray-300 text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-40"
+                  >
+                    Set stage\u2026
+                  </button>
+                  {stageBusy && <span className="text-xs text-gray-400">Saving\u2026</span>}
+                </div>
+                <p className="text-[11px] text-gray-400 mt-2">
+                  Back moves the stage marker only — it never reopens or deletes completed tasks. Stage 3 (Awarded) and later require a linked client and job site.
+                </p>
+              </>
+            )}
+
+            {stageError && (
+              <p className="text-sm text-red-700 mt-3">{stageError}</p>
+            )}
+
+            {showStageModal && (
+              <div
+                className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+                onClick={() => !stageBusy && setShowStageModal(false)}
+              >
+                <div className="bg-white rounded-lg shadow-xl max-w-md w-full p-5" onClick={e => e.stopPropagation()}>
+                  <h3 className="text-base font-semibold text-gray-900 mb-1">Change workflow stage</h3>
+                  <p className="text-sm text-gray-600 mb-4">
+                    {project.project_number ?? 'This project'} is at{' '}
+                    <span className="font-medium text-gray-900">
+                      {stageLabelOf(project.current_stage) ?? `Stage ${project.current_stage ?? '-'}`}
+                    </span>. Move it to:
+                  </p>
+
+                  <select
+                    value={stageTarget ?? ''}
+                    onChange={e => setStageTarget(Number(e.target.value))}
+                    className="w-full border border-gray-300 rounded px-2 py-1.5 text-sm text-gray-900 bg-white mb-3"
+                  >
+                    {stages.map(s => (
+                      <option key={s.stage_number} value={s.stage_number}>
+                        Stage {s.stage_number} — {s.label}
+                      </option>
+                    ))}
+                  </select>
+
+                  {stageTarget != null && project.current_stage != null && stageTarget < project.current_stage && (
+                    <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded p-2 mb-3">
+                      Going back leaves completed and higher-stage tasks in place. It does not undo or reopen finished work.
+                    </p>
+                  )}
+                  <p className="text-xs text-gray-500 mb-3">
+                    Stage 3 (Awarded) and later require a linked client and job site, or the change is blocked.
+                  </p>
+
+                  {stageError && <p className="text-sm text-red-700 mb-3">{stageError}</p>}
+
+                  <div className="flex justify-end gap-2">
+                    <button
+                      onClick={() => setShowStageModal(false)}
+                      disabled={stageBusy}
+                      className="px-3 py-1.5 text-sm rounded border border-gray-300 text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-40"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      onClick={() => changeStage(stageTarget)}
+                      disabled={stageBusy || stageTarget == null || stageTarget === project.current_stage}
+                      className="px-3 py-1.5 text-sm rounded bg-pyramid-600 text-white hover:bg-pyramid-700 disabled:opacity-40 disabled:cursor-not-allowed"
+                    >
+                      {stageBusy ? 'Saving\u2026' : 'Confirm'}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+
           <div className="bg-white rounded-lg border border-gray-200 p-4">
             <p className="text-xs text-gray-400 uppercase tracking-wide mb-1">Status</p>
             <p className="text-sm font-medium text-gray-900 capitalize">{project.status ?? '-'}</p>
@@ -508,7 +689,11 @@ export default function ProjectDetail() {
           </div>
           <div className="bg-white rounded-lg border border-gray-200 p-4">
             <p className="text-xs text-gray-400 uppercase tracking-wide mb-1">Current Stage</p>
-            <p className="text-sm font-medium text-gray-900">{project.current_stage ?? '-'}</p>
+            <p className="text-sm font-medium text-gray-900">
+              {stageLabelOf(project.current_stage)
+                ? `Stage ${project.current_stage} — ${stageLabelOf(project.current_stage)}`
+                : (project.current_stage ?? '-')}
+            </p>
           </div>
           <div className="bg-white rounded-lg border border-gray-200 p-4">
             <p className="text-xs text-gray-400 uppercase tracking-wide mb-1">Project Number</p>
@@ -886,7 +1071,7 @@ export default function ProjectDetail() {
                 <input
                   type="checkbox"
                   checked={task.status === 'completed'}
-                  onChange={() => canToggle && toggleTask(task)}
+                  onChange={(e) => canToggle && setTaskStatus(task, e.target.checked ? 'completed' : 'pending')}
                   disabled={!canToggle}
                   className={`mt-0.5 w-4 h-4 rounded border-gray-300 text-pyramid-500 flex-shrink-0 ${
                     canToggle ? 'cursor-pointer' : 'cursor-not-allowed opacity-50'
@@ -895,8 +1080,15 @@ export default function ProjectDetail() {
 
                 {/* Task info */}
                 <div className="flex-1 min-w-0">
-                  <p className={`text-sm ${task.status === 'completed' ? 'line-through text-gray-400' : 'text-gray-900'}`}>
+                  <p className={`text-sm ${
+                    task.status === 'completed' || task.status === 'na'
+                      ? 'line-through text-gray-400'
+                      : 'text-gray-900'
+                  }`}>
                     {task.task_name}
+                    {task.status === 'na' && (
+                      <span className="ml-2 align-middle text-[10px] px-1.5 py-0.5 rounded bg-gray-100 text-gray-600">N/A</span>
+                    )}
                   </p>
 
                   <div className="flex flex-wrap items-center gap-3 mt-1">
@@ -954,6 +1146,28 @@ export default function ProjectDetail() {
                     <p className="text-[10px] text-gray-400 mt-1 italic">Not assigned to you</p>
                   )}
                 </div>
+
+                {/* Complete / N/A / Reopen — same gate as the checkbox */}
+                {canToggle && (
+                  <div className="flex flex-col items-end gap-1 flex-shrink-0">
+                    {task.status !== 'na' && (
+                      <button
+                        onClick={() => setTaskStatus(task, 'na')}
+                        className="text-xs px-2 py-0.5 rounded border border-gray-300 text-gray-600 bg-white hover:bg-gray-50"
+                      >
+                        N/A
+                      </button>
+                    )}
+                    {(task.status === 'na' || task.status === 'completed') && (
+                      <button
+                        onClick={() => setTaskStatus(task, 'pending')}
+                        className="text-xs px-2 py-0.5 rounded border border-gray-300 text-gray-600 bg-white hover:bg-gray-50"
+                      >
+                        Reopen
+                      </button>
+                    )}
+                  </div>
+                )}
               </div>
             )
           })}
