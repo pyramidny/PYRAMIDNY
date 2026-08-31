@@ -166,12 +166,24 @@ const SP_SUBFOLDER_TREE: Record<string, string[]> = {
   ],
 };
 
-// Valid user_role values (from DB enum) — used to validate role updates
+// Valid user_role values (from DB enum) — used to validate role updates.
+// The first 8 are Jorge's model (shown in the UI under his own names — see the
+// ROLES table in TeamManagement.jsx); the rest are legacy job-title roles his
+// model folds into "base role + hat". Still accepted so existing holders can be
+// read and re-saved, but they are no longer offered for new assignments.
 const VALID_ROLES = [
-  "admin", "director_of_operations", "sales_rep", "estimating_coordinator",
-  "estimator", "project_manager", "assistant_pm", "task_manager",
-  "purchasing_manager", "billing_coordinator", "office_manager", "field_crew",
+  "admin", "overseer", "director_of_operations", "task_manager",
+  "project_manager", "assistant_pm", "estimator", "field_crew",
+  // legacy — being phased out
+  "sales_rep", "estimating_coordinator", "purchasing_manager",
+  "billing_coordinator", "office_manager", "tool_manager",
 ];
+
+// Add-on "hats". Independent of base role, and mirrored on both profiles and
+// staff_whitelist. Kept in lockstep with the CHECK constraints in
+// 12_role_model_jorge8.sql — change one, change the other.
+const VALID_TOOL_ACCESS = ["none", "tech", "admin"];
+const VALID_BILLING_ACCESS = ["none", "view", "admin"];
 
 // ============================================================================
 // Helpers
@@ -894,12 +906,19 @@ serve(async (req) => {
         return json({ error: "Admin only" }, 403);
       }
 
-      const { email, display_name, full_name, role, division, phone, title } = body;
+      const { email, display_name, full_name, role, division, phone, title,
+              tool_access, billing_access } = body;
       if (!email || !full_name) {
         return json({ error: "email and full_name required" }, 400);
       }
       if (role && !VALID_ROLES.includes(role)) {
         return json({ error: `Invalid role. Must be one of: ${VALID_ROLES.join(", ")}` }, 400);
+      }
+      if (tool_access && !VALID_TOOL_ACCESS.includes(tool_access)) {
+        return json({ error: `Invalid tool_access. Must be one of: ${VALID_TOOL_ACCESS.join(", ")}` }, 400);
+      }
+      if (billing_access && !VALID_BILLING_ACCESS.includes(billing_access)) {
+        return json({ error: `Invalid billing_access. Must be one of: ${VALID_BILLING_ACCESS.join(", ")}` }, 400);
       }
 
       const normalizedEmail = String(email).toLowerCase().trim();
@@ -916,6 +935,8 @@ serve(async (req) => {
         division: division ?? null,
         phone: phone ?? null,
         title: title ?? null,
+        tool_access: tool_access ?? "none",
+        billing_access: billing_access ?? "none",
         is_active: true,
       };
 
@@ -946,6 +967,8 @@ serve(async (req) => {
           division: record.division,
           phone: record.phone,
           title: record.title,
+          tool_access: record.tool_access,
+          billing_access: record.billing_access,
           is_active: true,
           updated_at: new Date().toISOString(),
         }).eq("id", existingProfile.id);
@@ -982,6 +1005,18 @@ serve(async (req) => {
       if (updates?.full_name !== undefined)    allowed.full_name = updates.full_name;
       if (updates?.title !== undefined)        allowed.title = updates.title || null;
       if (updates?.phone !== undefined)        allowed.phone = updates.phone || null;
+      if (updates?.tool_access !== undefined) {
+        if (!VALID_TOOL_ACCESS.includes(updates.tool_access)) {
+          return json({ error: `Invalid tool_access` }, 400);
+        }
+        allowed.tool_access = updates.tool_access;
+      }
+      if (updates?.billing_access !== undefined) {
+        if (!VALID_BILLING_ACCESS.includes(updates.billing_access)) {
+          return json({ error: `Invalid billing_access` }, 400);
+        }
+        allowed.billing_access = updates.billing_access;
+      }
 
       if (Object.keys(allowed).length === 0) {
         return json({ error: "No valid fields to update" }, 400);
@@ -992,11 +1027,16 @@ serve(async (req) => {
         .update(allowed).eq("id", profileId).select().single();
       if (error) return json({ error: error.message }, 400);
 
-      // Also mirror role/division changes to the whitelist for consistency
-      if (allowed.role || allowed.division !== undefined) {
+      // Also mirror role/division/hat changes to the whitelist for consistency.
+      // Without this a deactivate-then-reinvite would silently restore the old
+      // access level from the stale whitelist row.
+      if (allowed.role || allowed.division !== undefined ||
+          allowed.tool_access !== undefined || allowed.billing_access !== undefined) {
         const mirror: Record<string, unknown> = {};
         if (allowed.role !== undefined) mirror.role = allowed.role;
         if (allowed.division !== undefined) mirror.division = allowed.division;
+        if (allowed.tool_access !== undefined) mirror.tool_access = allowed.tool_access;
+        if (allowed.billing_access !== undefined) mirror.billing_access = allowed.billing_access;
         await supabase.from("staff_whitelist")
           .update(mirror).eq("email", existing.email);
       }

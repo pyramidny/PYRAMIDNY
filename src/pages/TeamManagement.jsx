@@ -16,28 +16,59 @@ import { useAuth } from '@/context/AuthContext'
 const PROXY_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/project-proxy`
 const SB_TOKEN_KEY = 'sb-izjaxmcdlsdkdliqjlei-auth-token'
 
+// Jorge's 8 base roles. `value` is the DB identifier — deliberately left at the
+// legacy string so no live login is disturbed — while `label` is Jorge's word
+// for it, which is the only part anyone outside this file ever sees.
+// `overseer` is the one genuinely new enum value (12_role_model_jorge8.sql).
 const ROLES = [
-  { value: 'admin',                 label: 'Admin' },
-  { value: 'director_of_operations', label: 'Director of Operations' },
-  { value: 'sales_rep',             label: 'Sales Rep' },
-  { value: 'estimating_coordinator', label: 'Estimating Coordinator' },
-  { value: 'estimator',             label: 'Estimator' },
-  { value: 'project_manager',       label: 'Project Manager' },
-  { value: 'assistant_pm',          label: 'Assistant PM' },
-  { value: 'task_manager',          label: 'Task Manager' },
-  { value: 'purchasing_manager',    label: 'Purchasing Manager' },
-  { value: 'billing_coordinator',   label: 'Billing Coordinator' },
-  { value: 'office_manager',        label: 'Office Manager' },
-  { value: 'field_crew',            label: 'Field Crew' },
+  { value: 'admin',                  label: 'Admin' },
+  { value: 'overseer',               label: 'Overseer' },
+  { value: 'director_of_operations', label: 'Director' },
+  { value: 'task_manager',           label: 'Task Manager' },
+  { value: 'project_manager',        label: 'PM' },
+  { value: 'assistant_pm',           label: 'PM Asst' },
+  { value: 'estimator',              label: 'Estimator' },
+  { value: 'field_crew',             label: 'Field Tech' },
 ]
 
+// Roles Jorge's model folds into "base role + hat". Not offered for new
+// assignments, but still selectable so anyone currently sitting on one renders
+// as themselves instead of as a blank <select>. These vanish from the picker on
+// their own once the last holder is remapped.
+const LEGACY_ROLES = [
+  { value: 'office_manager',         label: 'Office Manager (legacy)' },
+  { value: 'purchasing_manager',     label: 'Purchasing Manager (legacy)' },
+  { value: 'billing_coordinator',    label: 'Billing Coordinator (legacy)' },
+  { value: 'estimating_coordinator', label: 'Estimating Coordinator (legacy)' },
+  { value: 'sales_rep',              label: 'Sales Rep (legacy)' },
+  { value: 'tool_manager',           label: 'Tool Manager (legacy)' },
+]
+
+// NULL division has always meant "all divisions" everywhere else in the app —
+// Sidebar.jsx renders it exactly that way. So "Both" needs no new column and no
+// migration; it is the empty value, finally carrying the label it always meant.
 const DIVISIONS = [
-  { value: '',        label: '(none)' },
+  { value: '',        label: 'Both (Regular + IRA)' },
   { value: 'regular', label: 'Regular' },
   { value: 'ira',     label: 'IRA / Rope Access' },
 ]
 
-const ROLE_LABEL = Object.fromEntries(ROLES.map(r => [r.value, r.label]))
+// Add-on "hats" — these layer on ANY base role, independently of it.
+const TOOL_ACCESS = [
+  { value: 'none',  label: 'No tool access' },
+  { value: 'tech',  label: 'Tool Tech' },
+  { value: 'admin', label: 'Tool Admin' },
+]
+
+const BILLING_ACCESS = [
+  { value: 'none',  label: 'No billing access' },
+  { value: 'view',  label: 'Billing: View' },
+  { value: 'admin', label: 'Billing: Admin' },
+]
+
+const ROLE_LABEL = Object.fromEntries(
+  [...ROLES, ...LEGACY_ROLES].map(r => [r.value, r.label])
+)
 
 function getAccessToken() {
   try {
@@ -49,6 +80,7 @@ function getAccessToken() {
 function roleBadgeColor(role) {
   if (role === 'admin') return 'bg-red-100 text-red-700'
   if (['director_of_operations', 'office_manager'].includes(role)) return 'bg-purple-100 text-purple-700'
+  if (role === 'overseer') return 'bg-indigo-100 text-indigo-700'
   if (['project_manager', 'assistant_pm'].includes(role)) return 'bg-blue-100 text-blue-700'
   if (['estimator', 'estimating_coordinator'].includes(role)) return 'bg-amber-100 text-amber-700'
   if (['purchasing_manager', 'billing_coordinator'].includes(role)) return 'bg-teal-100 text-teal-700'
@@ -71,6 +103,7 @@ export default function TeamManagement() {
   const [inviteDraft, setInviteDraft] = useState({
     email: '', full_name: '', display_name: '', role: 'field_crew',
     division: '', title: '', phone: '',
+    tool_access: 'none', billing_access: 'none',
   })
 
   // Inline role edit state
@@ -133,6 +166,8 @@ export default function TeamManagement() {
         display_name: w.display_name,
         role: w.role,
         division: w.division,
+        tool_access: w.tool_access ?? 'none',
+        billing_access: w.billing_access ?? 'none',
         title: w.title,
         phone: w.phone,
         is_active: w.is_active,
@@ -149,6 +184,8 @@ export default function TeamManagement() {
         display_name: p.display_name,
         role: p.role,
         division: p.division,
+        tool_access: p.tool_access ?? 'none',
+        billing_access: p.billing_access ?? 'none',
         title: p.title,
         phone: p.phone,
         is_active: p.is_active,
@@ -177,6 +214,7 @@ export default function TeamManagement() {
       setInviteDraft({
         email: '', full_name: '', display_name: '', role: 'field_crew',
         division: '', title: '', phone: '',
+        tool_access: 'none', billing_access: 'none',
       })
       await loadAll()
     } catch (err) {
@@ -192,6 +230,8 @@ export default function TeamManagement() {
       role: row.role,
       division: row.division ?? '',
       title: row.title ?? '',
+      tool_access: row.tool_access ?? 'none',
+      billing_access: row.billing_access ?? 'none',
     })
   }
 
@@ -206,6 +246,8 @@ export default function TeamManagement() {
             role: editDraft.role,
             division: editDraft.division || null,
             title: editDraft.title || null,
+            tool_access: editDraft.tool_access,
+            billing_access: editDraft.billing_access,
           },
         })
       } else {
@@ -218,6 +260,8 @@ export default function TeamManagement() {
           role: editDraft.role,
           division: editDraft.division || null,
           title: editDraft.title || null,
+          tool_access: editDraft.tool_access,
+          billing_access: editDraft.billing_access,
           phone: row.phone,
         })
       }
@@ -370,7 +414,12 @@ export default function TeamManagement() {
               onChange={(e) => setEditDraft(d => ({ ...d, role: e.target.value }))}
               className="text-sm border border-gray-200 rounded px-2 py-1 w-full text-gray-900 bg-white"
             >
-              {ROLES.map(r => <option key={r.value} value={r.value}>{r.label}</option>)}
+              <optgroup label="Base role">
+                {ROLES.map(r => <option key={r.value} value={r.value}>{r.label}</option>)}
+              </optgroup>
+              <optgroup label="Retired — being phased out">
+                {LEGACY_ROLES.map(r => <option key={r.value} value={r.value}>{r.label}</option>)}
+              </optgroup>
             </select>
           ) : (
             <span className={`text-xs px-2 py-0.5 rounded-full ${roleBadgeColor(row.role)}`}>
@@ -391,8 +440,47 @@ export default function TeamManagement() {
             </select>
           ) : (
             <span className="text-xs text-gray-600">
-              {row.division === 'regular' ? 'Regular' : row.division === 'ira' ? 'IRA' : '—'}
+              {row.division === 'regular' ? 'Regular' : row.division === 'ira' ? 'IRA' : 'Both'}
             </span>
+          )}
+        </td>
+
+        {/* Access hats — layer on any base role, set independently of it */}
+        <td className="px-4 py-3">
+          {isEditing ? (
+            <div className="flex flex-col gap-1">
+              <select
+                value={editDraft.tool_access}
+                onChange={(e) => setEditDraft(d => ({ ...d, tool_access: e.target.value }))}
+                className="text-xs border border-gray-200 rounded px-2 py-1 w-full text-gray-900 bg-white"
+              >
+                {TOOL_ACCESS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+              </select>
+              <select
+                value={editDraft.billing_access}
+                onChange={(e) => setEditDraft(d => ({ ...d, billing_access: e.target.value }))}
+                className="text-xs border border-gray-200 rounded px-2 py-1 w-full text-gray-900 bg-white"
+              >
+                {BILLING_ACCESS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+              </select>
+            </div>
+          ) : (
+            <div className="flex flex-wrap gap-1">
+              {row.tool_access && row.tool_access !== 'none' && (
+                <span className="text-[10px] px-2 py-0.5 rounded-full bg-teal-100 text-teal-700">
+                  Tool: {row.tool_access === 'admin' ? 'Admin' : 'Tech'}
+                </span>
+              )}
+              {row.billing_access && row.billing_access !== 'none' && (
+                <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-100 text-amber-700">
+                  Billing: {row.billing_access === 'admin' ? 'Admin' : 'View'}
+                </span>
+              )}
+              {(!row.tool_access || row.tool_access === 'none') &&
+               (!row.billing_access || row.billing_access === 'none') && (
+                <span className="text-xs text-gray-400">—</span>
+              )}
+            </div>
           )}
         </td>
 
@@ -479,13 +567,14 @@ export default function TeamManagement() {
                 <th className="px-4 py-2 text-xs font-semibold text-gray-500 uppercase tracking-wider">Status</th>
                 <th className="px-4 py-2 text-xs font-semibold text-gray-500 uppercase tracking-wider">Role</th>
                 <th className="px-4 py-2 text-xs font-semibold text-gray-500 uppercase tracking-wider">Division</th>
+                <th className="px-4 py-2 text-xs font-semibold text-gray-500 uppercase tracking-wider">Access</th>
                 <th className="px-4 py-2 text-xs font-semibold text-gray-500 uppercase tracking-wider text-right">Actions</th>
               </tr>
             </thead>
             <tbody>
               {(tab === 'active' ? activeRows : inactiveRows).length === 0 ? (
                 <tr>
-                  <td colSpan={5} className="px-4 py-8 text-center text-sm text-gray-500">
+                  <td colSpan={6} className="px-4 py-8 text-center text-sm text-gray-500">
                     {tab === 'active' ? 'No active staff.' : 'No inactive staff.'}
                   </td>
                 </tr>
@@ -625,7 +714,12 @@ export default function TeamManagement() {
                   onChange={(e) => setInviteDraft(d => ({ ...d, role: e.target.value }))}
                   className="w-full border border-gray-200 rounded px-2 py-1.5 text-sm text-gray-900"
                 >
-                  {ROLES.map(r => <option key={r.value} value={r.value}>{r.label}</option>)}
+                  <optgroup label="Base role">
+                {ROLES.map(r => <option key={r.value} value={r.value}>{r.label}</option>)}
+              </optgroup>
+              <optgroup label="Retired — being phased out">
+                {LEGACY_ROLES.map(r => <option key={r.value} value={r.value}>{r.label}</option>)}
+              </optgroup>
                 </select>
               </div>
               <div>
@@ -636,6 +730,29 @@ export default function TeamManagement() {
                   className="w-full border border-gray-200 rounded px-2 py-1.5 text-sm text-gray-900"
                 >
                   {DIVISIONS.map(d => <option key={d.value} value={d.value}>{d.label}</option>)}
+                </select>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="text-xs text-gray-600 block mb-1">Tool access</label>
+                <select
+                  value={inviteDraft.tool_access}
+                  onChange={(e) => setInviteDraft(d => ({ ...d, tool_access: e.target.value }))}
+                  className="w-full border border-gray-200 rounded px-2 py-1.5 text-sm text-gray-900"
+                >
+                  {TOOL_ACCESS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="text-xs text-gray-600 block mb-1">Billing access</label>
+                <select
+                  value={inviteDraft.billing_access}
+                  onChange={(e) => setInviteDraft(d => ({ ...d, billing_access: e.target.value }))}
+                  className="w-full border border-gray-200 rounded px-2 py-1.5 text-sm text-gray-900"
+                >
+                  {BILLING_ACCESS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
                 </select>
               </div>
             </div>

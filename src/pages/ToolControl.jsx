@@ -146,7 +146,10 @@ function PhotoPicker({ photos, onChange, max = 2, label = 'Photos (optional)' })
 /* ---------------------------------------------------------------- page */
 export default function ToolControl() {
   const { isAdmin, profile } = useAuth()
-  const canManage = isAdmin || profile?.role === 'tool_manager'
+  // Tool ADMIN tier only — see the note in Layout.jsx. Tool Tech keeps scan,
+  // checkout and activity, which are open to any authenticated user.
+  const canManage =
+    isAdmin || profile?.tool_access === 'admin' || profile?.role === 'tool_manager'
 
   const [params, setParams] = useSearchParams()
   let tab = params.get('tab') || 'scan'
