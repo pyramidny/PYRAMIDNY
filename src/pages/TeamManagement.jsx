@@ -55,13 +55,13 @@ const DIVISIONS = [
 
 // Add-on "hats" — these layer on ANY base role, independently of it.
 const TOOL_ACCESS = [
-  { value: 'none',  label: 'No tool access' },
-  { value: 'tech',  label: 'Tool Tech' },
-  { value: 'admin', label: 'Tool Admin' },
+  { value: 'none',  label: 'Tool: None' },
+  { value: 'tech',  label: 'Tool: Tech' },
+  { value: 'admin', label: 'Tool: Admin' },
 ]
 
 const BILLING_ACCESS = [
-  { value: 'none',  label: 'No billing access' },
+  { value: 'none',  label: 'Billing: None' },
   { value: 'view',  label: 'Billing: View' },
   { value: 'admin', label: 'Billing: Admin' },
 ]
@@ -448,7 +448,7 @@ export default function TeamManagement() {
         {/* Access hats — layer on any base role, set independently of it */}
         <td className="px-4 py-3">
           {isEditing ? (
-            <div className="flex flex-col gap-1">
+            <div className="flex flex-col gap-1 min-w-[8.5rem]">
               <select
                 value={editDraft.tool_access}
                 onChange={(e) => setEditDraft(d => ({ ...d, tool_access: e.target.value }))}
