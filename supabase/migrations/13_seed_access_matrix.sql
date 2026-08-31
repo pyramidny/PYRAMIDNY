@@ -160,7 +160,17 @@ SELECT email, full_name, role::text AS role, tool_access, billing_access
    )
  ORDER BY full_name;
 
--- Admin count before/after should drop from 9 to 5. Billing admins should be 4.
+-- EXPECTED AFTER THIS SEED:  admins 6 · billing_admins 3 · tool_hats 3
+--
+-- These count `profiles` only, so they are NOT the numbers on the Team screen.
+-- Eleven people have never logged in and exist as whitelist rows with no
+-- profile yet; the Team screen merges both, so it shows more. In particular
+-- Noemi Santos is demoted off Admin by this seed but has no profile, so she
+-- doesn't move this number — and Luis Reyes keeps Admin because he is
+-- deliberately not in this seed at all.
+--
+-- On the Team screen the admin count goes 9 -> 7 (Aashtha, Jesus and Noemi
+-- come off; Olivia goes on).
 SELECT COUNT(*) FILTER (WHERE role::text = 'admin')        AS admins,
        COUNT(*) FILTER (WHERE billing_access = 'admin')    AS billing_admins,
        COUNT(*) FILTER (WHERE tool_access <> 'none')       AS tool_hats
