@@ -4,6 +4,48 @@ Append new entries to the top. Format: SOLVED / PROBLEM / FIX / HAND-OFF.
 
 ---
 
+## SOLVED — Jorge's 8 roles wouldn't fit the 12-value user_role enum
+*Date: 2026-08-31 — full write-up: `docs/SOLVED_role_model_and_access_hats.md`*
+
+**PROBLEM**
+Jorge's permission matrix defines 8 base roles plus two add-on "hats" (Tool,
+Billing). The `user_role` enum held 12 job-title roles; only `admin`,
+`task_manager` and `estimator` matched by name. Writing `pm` or `overseer`
+returned `Invalid role` from the project-proxy `VALID_ROLES` check. Tool access
+was a role (`tool_manager`), not a hat, so "PM who also runs the tool crib" was
+unexpressible. Billing had no representation at all.
+
+**FIX**
+Stored value and displayed name are not the same thing — `TeamManagement.jsx`
+already mapped `value` → `label`. Jorge's names went on the labels; the legacy
+identifiers stayed as the values. Only `overseer` was genuinely new. The six
+roles his model folds into "base + hat" moved to a "Retired" `<optgroup>` rather
+than being removed, so current holders don't render as a blank `<select>`.
+Hats added as `text NOT NULL DEFAULT 'none'` + CHECK on both `profiles` and
+`staff_whitelist`, tool hat backfilled from `tool_manager` before any base role
+moved. `12_role_model_jorge8.sql` + `13_seed_access_matrix.sql`.
+
+Division "Both" needed no migration: `Sidebar.jsx` had been rendering
+`division: null` as "All Divisions" all along. Do NOT add a literal `'both'` —
+the division type is shared with `projects`, where a project must be Regular or
+IRA and never both.
+
+**HAND-OFF**
+31 staff loaded, verified `admins 6 · billing_admins 3 · tool_hats 3`. Deploy
+order is SQL → edge function → frontend and is not optional: `update_profile`
+ignores unknown keys, so a frontend deployed first saves hats with a 200 and
+changes nothing — silent, not loud. Note `profiles` and `staff_whitelist` count
+differently; 11 staff have no profile row yet, so a `profiles` query reads 6
+admins where the Team screen reads 7.
+
+Still open: the POLICY rewrite (this changed what people *are*, not what they
+can *do* — `permissions.js` and its proxy mirror are still `["admin"]` on most
+actions), Luis Reyes holding Admin while absent from the matrix, and two email
+mismatches (Victor Ortiz, Jesus Cruz) that the Team screen cannot fix because
+email is the whitelist key.
+
+---
+
 ## SOLVED — Microsoft secrets loaded into the wrong Supabase project
 *Date: May 2026*
 
