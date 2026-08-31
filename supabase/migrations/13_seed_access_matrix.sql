@@ -126,7 +126,9 @@ ON CONFLICT (email) DO UPDATE
   SET role           = EXCLUDED.role,
       tool_access    = EXCLUDED.tool_access,
       billing_access = EXCLUDED.billing_access,
-      title          = COALESCE(public.staff_whitelist.title, EXCLUDED.title),
+      -- Unqualified table name: Postgres rejects a schema-qualified reference
+      -- to the conflict target inside DO UPDATE.
+      title          = COALESCE(staff_whitelist.title, EXCLUDED.title),
       is_active      = true;
 
 COMMIT;
