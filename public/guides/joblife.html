@@ -1,0 +1,272 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Pyramid — The Life of a Job</title>
+<style>
+  :root{
+    --bg:#0B0E13; --panel:#141821; --panel-2:#1A1F2A; --panel-3:#212734;
+    --line:#262C38; --line-2:#333B4A;
+    --ink:#E8EAED; --ink-2:#A8B0BE; --ink-3:#737C8C;
+    --or:#F97316; --or-dim:#3A1F09; --or-line:#7A3D0F;
+    --gr:#22C55E; --gr-dim:#0E2E19; --gr-line:#1D5233;
+    --bl:#3B82F6; --bl-dim:#0F2244; --bl-line:#1E4380;
+    --pu:#8B5CF6; --pu-dim:#241A45; --pu-line:#4A3785;
+    --qb:#2CA01C; --qb-dim:#0E2A0B; --qb-line:#1E5416;
+    --ui:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--ui);-webkit-font-smoothing:antialiased}
+  .wrap{max-width:1040px;margin:0 auto;padding:34px 22px 70px}
+  header{display:flex;align-items:center;gap:13px;padding-bottom:16px;border-bottom:1px solid var(--line);margin-bottom:8px}
+  .tri{width:0;height:0;border-left:15px solid transparent;border-right:15px solid transparent;border-bottom:26px solid var(--or)}
+  header b{display:block;font-size:15px;letter-spacing:.09em;font-weight:800}
+  header span{display:block;font-size:9.5px;letter-spacing:.13em;color:var(--ink-3);margin-top:2px}
+  h1{font-size:27px;letter-spacing:-.02em;margin:22px 0 5px}
+  .lead{color:var(--ink-3);font-size:14px;margin:0 0 20px;max-width:74ch;line-height:1.55}
+
+  /* legend — the three layers */
+  .layers{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:14px}
+  .layer{border:1px solid var(--line);border-radius:9px;padding:11px 13px;background:var(--panel)}
+  .layer .tag{display:inline-block;font-size:9.5px;font-weight:800;letter-spacing:.07em;text-transform:uppercase;
+    padding:2px 8px;border-radius:5px;margin-bottom:6px}
+  .layer.app .tag{background:var(--or-dim);color:#F9A05C;border:1px solid var(--or-line)}
+  .layer.sp .tag{background:var(--bl-dim);color:#7FB0FF;border:1px solid var(--bl-line)}
+  .layer.qb .tag{background:var(--qb-dim);color:#5FD34E;border:1px solid var(--qb-line)}
+  .layer p{margin:0;font-size:11.5px;color:var(--ink-3);line-height:1.45}
+  .layer b{color:var(--ink)}
+
+  .constline{font-size:12px;color:var(--ink-3);margin:0 0 26px;padding:11px 14px;background:var(--panel);
+    border:1px solid var(--line);border-left:3px solid var(--gr);border-radius:8px;line-height:1.55}
+  .constline b{color:#88E0AB}
+
+  /* timeline */
+  .tl{position:relative;padding-left:52px}
+  .tl::before{content:"";position:absolute;left:18px;top:8px;bottom:40px;width:2px;background:var(--line-2)}
+
+  .step{position:relative;margin-bottom:16px}
+  .dot{position:absolute;left:-52px;top:2px;width:37px;height:37px;border-radius:99px;display:flex;
+    align-items:center;justify-content:center;font-size:14px;font-weight:800;z-index:2;
+    background:var(--panel-3);border:2px solid var(--line-2);color:var(--ink-2)}
+  .dot.setup{background:var(--or);border-color:var(--or);color:#fff}
+  .dot.bid{background:var(--bl);border-color:var(--bl);color:#04122E}
+  .dot.trig{background:var(--gr);border-color:var(--gr);color:#062B14;box-shadow:0 0 0 4px var(--gr-dim)}
+  .dot.prod{background:var(--pu);border-color:var(--pu);color:#fff}
+  .dot.bill{background:var(--qb);border-color:var(--qb);color:#fff}
+
+  .card{border:1px solid var(--line);border-radius:10px;background:var(--panel);overflow:hidden}
+  .card.setup{border-left:3px solid var(--or)}
+  .card.bid{border-left:3px solid var(--bl)}
+  .card.trig{border-left:3px solid var(--gr);background:linear-gradient(180deg,var(--gr-dim),var(--panel))}
+  .card.prod{border-left:3px solid var(--pu)}
+  .card.bill{border-left:3px solid var(--qb)}
+  .top{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:12px 15px 8px}
+  .top h3{margin:0;font-size:15px}
+  .owner{font-size:9.5px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;padding:2px 8px;border-radius:5px}
+  .owner.setup{background:var(--or-dim);color:#F9A05C}
+  .owner.bid{background:var(--bl-dim);color:#7FB0FF}
+  .owner.prod{background:var(--pu-dim);color:#B69BFF}
+  .owner.bill{background:var(--qb-dim);color:#5FD34E}
+  .stg{margin-left:auto;font-size:10.5px;color:var(--ink-3);font-family:var(--mono);white-space:nowrap}
+  .what{padding:0 15px 11px;font-size:12.5px;color:var(--ink-2);line-height:1.5}
+  .tracks{border-top:1px solid var(--line);padding:10px 15px;display:flex;flex-direction:column;gap:7px;background:var(--panel-2)}
+  .trk{display:flex;gap:10px;align-items:flex-start;font-size:12px;line-height:1.5}
+  .trk .lab{flex-shrink:0;font-size:9px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;
+    padding:2px 7px;border-radius:4px;margin-top:1px;width:88px;text-align:center}
+  .trk.app .lab{background:var(--or-dim);color:#F9A05C;border:1px solid var(--or-line)}
+  .trk.sp .lab{background:var(--bl-dim);color:#7FB0FF;border:1px solid var(--bl-line)}
+  .trk.qb .lab{background:var(--qb-dim);color:#5FD34E;border:1px solid var(--qb-line)}
+  .trk .txt{color:var(--ink-2)}
+  .trk code{font-family:var(--mono);font-size:11px;background:var(--panel-3);padding:1px 5px;border-radius:4px;color:var(--ink)}
+  .trk b{color:var(--ink)}
+
+  .split{display:flex;gap:8px;align-items:center;font-size:11.5px;color:var(--ink-3);
+    padding:7px 15px;font-style:italic}
+  .split .lost{color:#FF8A8A}
+
+  .foot{margin-top:30px;padding-top:16px;border-top:1px solid var(--line);display:flex;
+    justify-content:space-between;gap:12px;flex-wrap:wrap;font-size:11px;color:var(--ink-3)}
+  .foot b{color:var(--or)}
+
+  @media (max-width:720px){
+    .layers{grid-template-columns:1fr}
+    .tl{padding-left:44px} .tl::before{left:15px} .dot{left:-44px;width:32px;height:32px;font-size:12px}
+    .trk{flex-direction:column;gap:3px} .trk .lab{width:auto;align-self:flex-start}
+    .stg{margin-left:0;flex-basis:100%}
+  }
+
+  /* ---- Build-status markers (added when these guides moved into the portal) --
+     The guides describe the finished workflow. Anything depending on the billing
+     queue, A/R import or the Bids workspace is not built yet — those are phases
+     3-5 of the development plan. Remove a badge as its phase ships. */
+  :root{ --soon:#F5A524; --soon-dim:#33260A; --soon-line:#6B4E12; }
+  .soon,.partly{
+    display:inline-block; vertical-align:middle; margin-left:8px;
+    font-size:10px; font-weight:700; letter-spacing:.04em; text-transform:uppercase;
+    padding:2px 7px; border-radius:4px; white-space:nowrap;
+    background:var(--soon-dim); color:var(--soon); border:1px dashed var(--soon-line);
+  }
+  .partly{ opacity:.85; }
+  .phasebar{
+    margin:18px 0 26px; padding:13px 16px; border-radius:8px;
+    background:var(--soon-dim); border:1px solid var(--soon-line);
+    color:var(--ink-2); font-size:13.5px; line-height:1.55;
+  }
+  .phasebar b{ color:var(--soon); }
+  .phasebar .k{
+    display:inline-block; font-size:10px; font-weight:700; letter-spacing:.04em;
+    text-transform:uppercase; padding:1px 6px; border-radius:4px; margin:0 2px;
+    background:transparent; color:var(--soon); border:1px dashed var(--soon-line);
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header><div class="tri"></div><div><b>PYRAMID</b><span>RESTORATION SPECIALISTS</span></div></header>
+
+  <h1>The life of a job — start to finish</h1>
+  <p class="lead">One picture of everything that happens from a client's first call to a paid, closed
+  project. Read it top to bottom. At each step, three columns tell you what happens in three different
+  places — and those places are not the same thing.</p>
+
+  <div class="layers">
+    <div class="layer app"><span class="tag">In the app</span>
+      <p><b>Who works it.</b> The portal — where people enter and see information. Separation between
+      crews lives here, as views and permissions.</p></div>
+    <div class="layer sp"><span class="tag">In SharePoint</span>
+      <p><b>Where files live.</b> One folder per job, holds the documents. Passive storage — it doesn't
+      separate anyone.</p></div>
+    <div class="layer qb"><span class="tag">In QuickBooks</span>
+      <p><b>The money.</b> Invoices, payments, aging. QuickBooks does the math and stays the source of
+      truth for dollars.</p></div>
+  </div>
+
+  <p class="constline"><b>Constant the whole way:</b> the job's number and its SharePoint folder are
+  created once, at bid time, and never change or move. Only ownership and stage change as the job
+  progresses.</p>
+
+  <div class="phasebar">
+    <b>Read this first.</b> This guide describes the workflow end to end, including
+    parts of the portal that are still being built. Steps marked
+    <span class="k">Not built yet</span> or <span class="k">Partly built</span>
+    describe how it will work — don't go looking for those screens today. Everything
+    unmarked works right now. The badges come off as each phase ships.
+  </div>
+
+
+  <div class="tl">
+
+    <!-- 1 -->
+    <div class="step"><div class="dot setup">1</div>
+      <div class="card setup"><div class="top"><h3>Client comes in</h3>
+        <span class="owner setup">Admin / PM</span><span class="stg">— prospect —</span></div>
+        <div class="what">A management company or owner is entered. Starts as a prospect until they award work.</div>
+        <div class="tracks">
+          <div class="trk app"><span class="lab">App</span><span class="txt">Create the client in the Clients area. Marked <b>prospect</b>.</span></div>
+          <div class="trk sp"><span class="lab">SharePoint</span><span class="txt">Nothing yet — no folder until there's a bid.</span></div>
+        </div></div></div>
+
+    <!-- 2 -->
+    <div class="step"><div class="dot setup">2</div>
+      <div class="card setup"><div class="top"><h3>Job sites &amp; contacts added</h3>
+        <span class="owner setup">Admin / PM</span></div>
+        <div class="what">Each building the client manages, plus the people — office contacts on the client, site contacts on the buildings. One person can cover several buildings.</div>
+        <div class="tracks">
+          <div class="trk app"><span class="lab">App</span><span class="txt">Add job sites (BIN, block, lot) and contacts. Flag one as the <b>billing contact</b>.</span></div>
+          <div class="trk sp"><span class="lab">SharePoint</span><span class="txt">Still nothing — sites and contacts are data, not files.</span></div>
+        </div></div></div>
+
+    <!-- 3 -->
+    <div class="step"><div class="dot bid">3</div>
+      <div class="card bid"><div class="top"><h3>Bid is logged</h3><span class="partly">Partly built</span>
+        <span class="owner bid">Bidding crew</span><span class="stg">Stage 1</span></div>
+        <div class="what">An estimator opens a bid on a job site. This is the moment the job gets its number and its folder — both permanent.</div>
+        <div class="tracks">
+          <div class="trk app"><span class="lab">App</span><span class="txt">Bid created in the <b>Bids workspace</b>. Number assigned: <code>A11557</code> (IRA) or <code>P11558</code> (Regular), one shared sequence.</span></div>
+          <div class="trk sp"><span class="lab">SharePoint</span><span class="txt">Folder created and named with that number: <code>A11557 — 515 W 23rd St/</code>. Bid document goes into <code>1. Estimating Phase/</code>.</span></div>
+        </div></div></div>
+
+    <!-- 4 -->
+    <div class="step"><div class="dot bid">4</div>
+      <div class="card bid"><div class="top"><h3>Bid is worked</h3><span class="soon">Not built yet</span>
+        <span class="owner bid">Bidding crew</span><span class="stg">Stages 1–2</span></div>
+        <div class="what">Pricing, submission, interview, follow-up. The bidding crew owns it entirely — production isn't involved yet.</div>
+        <div class="tracks">
+          <div class="trk app"><span class="lab">App</span><span class="txt">Lives in the Bids workspace. Estimators only. Billing hears nothing.</span></div>
+          <div class="trk sp"><span class="lab">SharePoint</span><span class="txt">Estimating folder fills with pricing, drawings, walkthrough notes.</span></div>
+        </div></div>
+      <div class="split">↳ <span class="lost">If lost:</span> marked lost with a reason, kept for win-rate reporting. The job stops here.</div>
+    </div>
+
+    <!-- 5 — TRIGGER -->
+    <div class="step"><div class="dot trig">5</div>
+      <div class="card trig"><div class="top"><h3>Bid is won — the handoff</h3><span class="partly">Partly built</span>
+        <span class="owner bid">Bidding</span><span class="owner prod">→ Production</span><span class="stg">Stage 3 · Awarded</span></div>
+        <div class="what">The one moment everything pivots. Ownership passes from bidding to production, the client becomes a real client, and Billing is notified — all automatically. Nothing physically moves.</div>
+        <div class="tracks">
+          <div class="trk app"><span class="lab">App</span><span class="txt">Project <b>leaves the Bids workspace</b> and appears in the Production view. Client promotes prospect → client. A billing-queue item is created.</span></div>
+          <div class="trk sp"><span class="lab">SharePoint</span><span class="txt"><b>Same folder</b> — nothing moves. <code>2. Production/</code> and <code>3. Photos/</code> now become the active areas; bid docs stay in Estimating as the record.</span></div>
+        </div></div></div>
+
+    <!-- 6 KICKOFF -->
+    <div class="step"><div class="dot bill">6</div>
+      <div class="card bill"><div class="top"><h3>Kickoff meeting</h3>
+        <span class="owner bill">PM · Billing · Admin</span></div>
+        <div class="what">Job details, insurance and permit requirements, scope, and payment schedule are walked through before work is scheduled — normally a 2–3 month runway before production starts. This meeting stays exactly as it is today; the app just has everything ready for it.</div>
+        <div class="tracks">
+          <div class="trk app"><span class="lab">App</span><span class="txt">The bid doc, insurance and permit requirements, scope and payment schedule are already on the project — nothing to gather first.</span></div>
+          <div class="trk sp"><span class="lab">SharePoint</span><span class="txt">Bid and reference docs are in the Estimating folder, linked from the project.</span></div>
+        </div></div></div>
+
+    <!-- 7 -->
+    <div class="step"><div class="dot bill">7</div>
+      <div class="card bill"><div class="top"><h3>Billing sets up the job</h3><span class="soon">Not built yet</span>
+        <span class="owner bill">Billing · Noemi</span></div>
+        <div class="what">The billing queue hands Noemi everything she needs, so she never hunts for it.</div>
+        <div class="tracks">
+          <div class="trk app"><span class="lab">App</span><span class="txt">Queue card shows client, contract, bill-to inline, plus a one-click link to the bid doc.</span></div>
+          <div class="trk qb"><span class="lab">QuickBooks</span><span class="txt">Noemi creates the <code>Customer:Job</code> and pastes the path back into the app. That path is the key every invoice matches on.</span></div>
+        </div></div></div>
+
+    <!-- 8 -->
+    <div class="step"><div class="dot prod">8</div>
+      <div class="card prod"><div class="top"><h3>Production runs</h3>
+        <span class="owner prod">Production crew</span><span class="stg">Stages 4–6</span></div>
+        <div class="what">Pre-con, mobilization, the actual work. PMs and field own it now.</div>
+        <div class="tracks">
+          <div class="trk app"><span class="lab">App</span><span class="txt">Lives in the Regular / IRA project views. PM, APM, field crew. Stages advance as work progresses.</span></div>
+          <div class="trk sp"><span class="lab">SharePoint</span><span class="txt">Production and Photos folders fill — field reports, daily logs, progress photos.</span></div>
+          <div class="trk qb"><span class="lab">QuickBooks</span><span class="txt">Noemi invoices and records payments as the work bills out — including AIA pay applications on larger jobs.</span></div>
+        </div></div></div>
+
+    <!-- 9 -->
+    <div class="step"><div class="dot bill">9</div>
+      <div class="card bill"><div class="top"><h3>Money comes back into view</h3><span class="soon">Not built yet</span>
+        <span class="owner bill">Billing → everyone</span></div>
+        <div class="what">The A/R loop — how the team sees what's paid without asking Finance.</div>
+        <div class="tracks">
+          <div class="trk qb"><span class="lab">QuickBooks</span><span class="txt">Noemi runs the memorized A/R Aging Detail report and exports it to <b>CSV or Excel</b> (not PDF, so the app can read it).</span></div>
+          <div class="trk app"><span class="lab">App</span><span class="txt">The file is uploaded; the app matches each invoice to its project by <code>Customer:Job</code> and shows <b>paid / unpaid / 30-60-90 aging</b> right on the job. The <b>Rep / PM on each invoice</b> is tracked and routes its A/R to that PM's view — automating the per-PM tabs Finance keeps by hand.</span></div>
+        </div></div></div>
+
+    <!-- 10 -->
+    <div class="step"><div class="dot prod">10</div>
+      <div class="card prod"><div class="top"><h3>Closeout</h3>
+        <span class="owner prod">Production · Billing</span><span class="stg">Stages 7–10</span></div>
+        <div class="what">Final payment, closeout package, retainage released, marked closed.</div>
+        <div class="tracks">
+          <div class="trk app"><span class="lab">App</span><span class="txt">Final stages advance to Closed. The full history stays on the project.</span></div>
+          <div class="trk sp"><span class="lab">SharePoint</span><span class="txt">Closeout documents filed. The one folder now holds the whole job, bid to close.</span></div>
+        </div></div></div>
+
+  </div>
+
+  <div class="foot">
+    <div><b>Kane PC</b> — Managed IT &amp; Custom Application Development</div>
+    <div>Pyramid Restoration Staff Portal · the life of a job</div>
+  </div>
+</div>
+</body>
+</html>

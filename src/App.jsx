@@ -13,6 +13,7 @@ import Notifications from '@/pages/Notifications'
 import ProjectDetail from '@/pages/ProjectDetail'
 import { ProjectList } from '@/pages/ProjectList'
 import ClientList from '@/pages/ClientList'
+import Guides from '@/pages/Guides'
 import ClientDetail from '@/pages/ClientDetail'
 import SiteDetail from '@/pages/SiteDetail'
 import { Navigate, Route, Routes, useLocation } from 'react-router-dom'
@@ -51,6 +52,7 @@ export default function App() {
         <Route path="/tasks" element={<MyTasks />} />
         <Route path="/tools" element={<ToolControl />} />
         <Route path="/team" element={<TeamManagement />} />
+        <Route path="/guides" element={<Guides />} />
         <Route path="/settings" element={<Settings />} />
         <Route path="/notifications" element={<Notifications />} />
       </Route>

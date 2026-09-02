@@ -1,0 +1,329 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Pyramid — Billing Runbook</title>
+<style>
+  :root{
+    --bg:#0B0E13; --panel:#141821; --panel-2:#1A1F2A; --panel-3:#212734;
+    --line:#262C38; --line-2:#333B4A;
+    --ink:#E8EAED; --ink-2:#A8B0BE; --ink-3:#737C8C;
+    --or:#F97316; --or-dim:#3A1F09; --or-line:#7A3D0F;
+    --gr:#22C55E; --gr-dim:#0E2E19; --gr-line:#1D5233;
+    --bl:#3B82F6; --bl-dim:#0F2244; --bl-line:#1E4380;
+    --qb:#2CA01C; --qb-dim:#0E2A0B; --qb-line:#1E5416;
+    --rd:#EF4444; --rd-dim:#3A1416; --rd-line:#7F2226;
+    --ui:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--ui);-webkit-font-smoothing:antialiased}
+  .wrap{max-width:900px;margin:0 auto;padding:32px 22px 70px}
+  header{display:flex;align-items:center;gap:13px;padding-bottom:15px;border-bottom:1px solid var(--line);margin-bottom:8px}
+  .tri{width:0;height:0;border-left:14px solid transparent;border-right:14px solid transparent;border-bottom:24px solid var(--or)}
+  header b{display:block;font-size:14.5px;letter-spacing:.09em;font-weight:800}
+  header span{display:block;font-size:9px;letter-spacing:.13em;color:var(--ink-3);margin-top:2px}
+  h1{font-size:26px;letter-spacing:-.02em;margin:20px 0 5px}
+  .lead{color:var(--ink-3);font-size:14px;margin:0 0 8px;max-width:70ch;line-height:1.55}
+  .who{font-size:12.5px;color:var(--ink-2);margin:0 0 22px}
+  .who b{color:var(--or)}
+
+  code{font-family:var(--mono);font-size:12px;background:var(--panel-3);padding:2px 6px;border-radius:4px;color:var(--ink)}
+  kbd{font-family:var(--mono);font-size:11px;background:var(--panel-3);border:1px solid var(--line-2);
+    border-bottom-width:2px;padding:2px 6px;border-radius:4px;color:var(--ink)}
+
+  /* tip system */
+  .tip{display:inline-flex;align-items:center;justify-content:center;width:17px;height:17px;border-radius:99px;
+    background:var(--bl-dim);border:1px solid var(--bl-line);color:#7FB0FF;font-size:10.5px;font-weight:800;
+    cursor:pointer;margin-left:6px;vertical-align:middle;user-select:none;flex-shrink:0}
+  .tip:hover{background:var(--bl);color:#fff}
+  .tipbody{display:none;margin:9px 0 0;background:var(--bl-dim);border:1px solid var(--bl-line);
+    border-left:3px solid var(--bl);border-radius:7px;padding:11px 13px;font-size:12.5px;line-height:1.55;color:#9CC4FF}
+  .tipbody.open{display:block}
+  .tipbody b{color:#C4DBFF}
+
+  /* decision box */
+  .fork{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:16px 18px;margin-bottom:22px}
+  .fork h2{margin:0 0 11px;font-size:13px;letter-spacing:.09em;text-transform:uppercase;color:var(--ink-2)}
+  .forkrow{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+  .opt{border:1px solid var(--line);border-radius:9px;padding:13px 15px;background:var(--panel-2)}
+  .opt.common{border-left:3px solid var(--gr)}
+  .opt.rare{border-left:3px solid var(--ink-3)}
+  .opt h3{margin:0 0 5px;font-size:14px}
+  .opt .freq{font-size:9.5px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;padding:2px 7px;
+    border-radius:4px;margin-bottom:7px;display:inline-block}
+  .opt.common .freq{background:var(--gr-dim);color:#5DDB8B;border:1px solid var(--gr-line)}
+  .opt.rare .freq{background:var(--panel-3);color:var(--ink-3);border:1px solid var(--line-2)}
+  .opt p{margin:0;font-size:12.5px;color:var(--ink-3);line-height:1.5}
+
+  /* steps */
+  .step{display:flex;gap:15px;margin-bottom:14px}
+  .num{width:31px;height:31px;border-radius:99px;flex-shrink:0;display:flex;align-items:center;justify-content:center;
+    font-size:13px;font-weight:800;background:var(--or);color:#fff;margin-top:2px}
+  .num.qb{background:var(--qb)}
+  .num.app{background:var(--or)}
+  .card{flex:1;background:var(--panel);border:1px solid var(--line);border-radius:10px;overflow:hidden;min-width:0}
+  .card.qb{border-left:3px solid var(--qb)}
+  .card.app{border-left:3px solid var(--or)}
+  .ct{display:flex;align-items:center;gap:9px;flex-wrap:wrap;padding:12px 15px 6px}
+  .ct h3{margin:0;font-size:15px}
+  .where{font-size:9.5px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;padding:2px 8px;border-radius:4px}
+  .where.qb{background:var(--qb-dim);color:#5FD34E;border:1px solid var(--qb-line)}
+  .where.app{background:var(--or-dim);color:#F9A05C;border:1px solid var(--or-line)}
+  .cb{padding:0 15px 14px}
+  .cb p{margin:0 0 9px;font-size:13px;line-height:1.6;color:var(--ink-2)}
+  .cb p:last-child{margin-bottom:0}
+  .path{background:var(--panel-2);border:1px solid var(--line);border-radius:7px;padding:10px 12px;
+    font-family:var(--mono);font-size:12px;color:var(--ink);margin:9px 0;line-height:1.7}
+  .path .arw{color:var(--or);margin:0 5px}
+  .eg{background:var(--gr-dim);border:1px solid var(--gr-line);border-radius:7px;padding:10px 12px;margin:9px 0;
+    font-size:12.5px;color:#88E0AB;line-height:1.6}
+  .eg b{color:#B6EFCC}
+  .eg .m{font-family:var(--mono);font-size:12px;color:#D4F5DF}
+  .warn{background:var(--rd-dim);border:1px solid var(--rd-line);border-left:3px solid var(--rd);border-radius:7px;
+    padding:10px 12px;margin:9px 0;font-size:12.5px;color:#FF9E9E;line-height:1.55}
+  .warn b{color:#FFC9C9}
+
+  ul.clean{margin:9px 0;padding-left:0;list-style:none}
+  ul.clean li{font-size:12.5px;color:var(--ink-2);line-height:1.55;padding-left:16px;position:relative;margin-bottom:5px}
+  ul.clean li::before{content:"";position:absolute;left:3px;top:7px;width:5px;height:5px;border-radius:99px;background:var(--or)}
+
+  .fieldtable{width:100%;border-collapse:collapse;margin:9px 0}
+  .fieldtable th{text-align:left;font-size:9.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--ink-3);
+    font-weight:700;padding:8px 11px;border-bottom:1px solid var(--line);background:var(--panel-2)}
+  .fieldtable td{padding:9px 11px;border-bottom:1px solid var(--line);font-size:12.5px;vertical-align:top}
+  .fieldtable tr:last-child td{border-bottom:none}
+  .fieldtable .f{font-family:var(--mono);font-size:11.5px;color:var(--ink);white-space:nowrap}
+
+  .weekly{background:linear-gradient(180deg,var(--qb-dim),var(--panel));border:1px solid var(--qb-line);
+    border-radius:10px;padding:17px 19px;margin-top:26px}
+  .weekly h2{margin:0 0 6px;font-size:16px;color:#B6EFCC}
+  .weekly p{margin:0 0 11px;font-size:13px;color:#88E0AB;line-height:1.55}
+  .weekly ol{margin:0;padding-left:20px;color:#88E0AB;font-size:13px;line-height:1.9}
+  .weekly ol b{color:#D4F5DF}
+
+  .foot{margin-top:32px;padding-top:15px;border-top:1px solid var(--line);display:flex;
+    justify-content:space-between;gap:12px;flex-wrap:wrap;font-size:11px;color:var(--ink-3)}
+  .foot b{color:var(--or)}
+
+  @media (max-width:640px){
+    .forkrow{grid-template-columns:1fr}
+    .step{gap:11px} .num{width:27px;height:27px;font-size:12px}
+    .fieldtable{display:block;overflow-x:auto}
+  }
+  @media print{
+    body{background:#fff;color:#111}
+    .tipbody{display:block!important}
+    .tip{display:none}
+  }
+
+  /* ---- Build-status markers (added when these guides moved into the portal) --
+     The guides describe the finished workflow. Anything depending on the billing
+     queue, A/R import or the Bids workspace is not built yet — those are phases
+     3-5 of the development plan. Remove a badge as its phase ships. */
+  :root{ --soon:#F5A524; --soon-dim:#33260A; --soon-line:#6B4E12; }
+  .soon,.partly{
+    display:inline-block; vertical-align:middle; margin-left:8px;
+    font-size:10px; font-weight:700; letter-spacing:.04em; text-transform:uppercase;
+    padding:2px 7px; border-radius:4px; white-space:nowrap;
+    background:var(--soon-dim); color:var(--soon); border:1px dashed var(--soon-line);
+  }
+  .partly{ opacity:.85; }
+  .phasebar{
+    margin:18px 0 26px; padding:13px 16px; border-radius:8px;
+    background:var(--soon-dim); border:1px solid var(--soon-line);
+    color:var(--ink-2); font-size:13.5px; line-height:1.55;
+  }
+  .phasebar b{ color:var(--soon); }
+  .phasebar .k{
+    display:inline-block; font-size:10px; font-weight:700; letter-spacing:.04em;
+    text-transform:uppercase; padding:1px 6px; border-radius:4px; margin:0 2px;
+    background:transparent; color:var(--soon); border:1px dashed var(--soon-line);
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header><div class="tri"></div><div><b>PYRAMID</b><span>RESTORATION SPECIALISTS</span></div></header>
+
+  <h1>Billing runbook — from awarded job to paid invoice</h1>
+  <p class="lead">What to do in QuickBooks when a job is awarded, and how the portal and QuickBooks stay in
+  step. Written for the way Pyramid actually bills — parent management company, jobs underneath, AIA pay
+  applications on the bigger work.</p>
+  <p class="who">Primary owner: <b>Noemi Santos</b> · Backup: Nina Lee-Chan · Questions: Bill Kane, <a href="mailto:app@pyramidny.com">app@pyramidny.com</a>
+  <span class="tip" data-tip="t0">?</span></p>
+  <div class="tipbody" id="t0"><b>Why this exists.</b> Today the billing labels get made up fresh for each
+  location, which is why the same client's jobs are named a few different ways in QuickBooks. This runbook
+  fixes that by writing the naming down once. Nothing about how you invoice changes.</div>
+
+  <div class="phasebar">
+    <b>Read this first.</b> This guide describes the workflow end to end, including
+    parts of the portal that are still being built. Steps marked
+    <span class="k">Not built yet</span> or <span class="k">Partly built</span>
+    describe how it will work — don't go looking for those screens today. Everything
+    unmarked works right now. The badges come off as each phase ships.
+  </div>
+
+
+  <!-- FORK -->
+  <div class="fork">
+    <h2>First — is this a new client, or a new job for a client you already bill?</h2>
+    <div class="forkrow">
+      <div class="opt common"><span class="freq">Most of the time</span>
+        <h3>Existing customer → Add Job</h3>
+        <p>Akam, Douglas Elliman, Tri-Hill and the rest are already in QuickBooks. You do <b>not</b> create
+        a new customer. You add a <b>Job</b> underneath the one that's already there. Skip to Step 1.</p></div>
+      <div class="opt rare"><span class="freq">Occasionally</span>
+        <h3>Brand-new company → New Customer, then Add Job</h3>
+        <p>Only when Pyramid has never billed this management company before. Create the customer first,
+        then add the job under it. Never create a customer per building.</p></div>
+    </div>
+    <span class="tip" data-tip="t1">?</span> <span style="font-size:12px;color:var(--ink-3)">Why never a customer per building</span>
+    <div class="tipbody" id="t1"><b>Because a property manager pays the bills, not the building.</b> Akam
+    manages Victoria House, 805 Washington and 269 West 72nd — three buildings, one company writing the
+    checks. If each building were its own customer, you couldn't see what Akam owes you in total, and the
+    A/R report would scatter one relationship across three lines. Buildings are <b>jobs</b> underneath the
+    company.</div>
+  </div>
+
+  <!-- STEP 1 -->
+  <div class="step"><div class="num app">1</div>
+    <div class="card app"><div class="ct"><h3>Open the billing queue item</h3><span class="soon">Not built yet</span><span class="where app">Portal</span></div>
+      <div class="cb">
+        <p>When a bid is won, the job lands in the portal's <b>Billing queue</b> on its own — you don't have
+        to be told. Open the card. Everything you need to create the QuickBooks job is on it, and the bid
+        document is one click away.<span class="tip" data-tip="t2">?</span></p>
+        <div class="tipbody" id="t2"><b>This is the part that replaces the hunting.</b> Today you go looking
+        through the server folders for the bid docs before you can start a bill. The card carries the client,
+        job site, contract amount, who to invoice, and a link straight to the bid document in SharePoint.</div>
+        <ul class="clean">
+          <li>Client name and type</li>
+          <li>Job site — address, BIN, block and lot</li>
+          <li>Contract amount and division (Regular or IRA)</li>
+          <li>Who receives invoices at that client</li>
+          <li>PM and their Rep code</li>
+          <li>A suggested <code>Customer:Job</code> name</li>
+        </ul>
+      </div></div></div>
+
+  <!-- STEP 2 -->
+  <div class="step"><div class="num qb">2</div>
+    <div class="card qb"><div class="ct"><h3>Add the job in QuickBooks</h3><span class="where qb">QuickBooks Enterprise</span></div>
+      <div class="cb">
+        <p>Open the Customer Center and add the job under the parent company.</p>
+        <div class="path">Customers <span class="arw">→</span> Customer Center <span style="color:var(--ink-3)">(or <kbd>Ctrl</kbd> + <kbd>J</kbd>)</span><br>
+          <span class="arw">→</span> right-click the parent customer <span style="color:var(--ink-3)">e.g. Akam</span><br>
+          <span class="arw">→</span> <b>Add Job</b></div>
+        <p>The New Job window opens with the parent's details already filled in.<span class="tip" data-tip="t3">?</span></p>
+        <div class="tipbody" id="t3"><b>The address on the job is the job site — change it.</b> QuickBooks
+        pre-fills the parent company's address. Overwrite it with the building address from the queue card.
+        Editing it here only affects this job, never the parent customer's record. That's how one Akam
+        record ends up with three different building addresses underneath it.</div>
+      </div></div></div>
+
+  <!-- STEP 3 -->
+  <div class="step"><div class="num qb">3</div>
+    <div class="card qb"><div class="ct"><h3>Name the job — the important part</h3><span class="where qb">QuickBooks Enterprise</span></div>
+      <div class="cb">
+        <p>Use the Pyramid job number first, then the address, then the scope:</p>
+        <div class="eg"><b>Format</b><br>
+          <span class="m">P11512 - 200 East 27th Street_Facade Restoration</span><br><br>
+          <b>Which makes the full path</b><br>
+          <span class="m">Akam:P11512 - 200 East 27th Street_Facade Restoration</span></div>
+        <p>The portal suggests this name on the queue card — you can paste it straight in.<span class="tip" data-tip="t4">?</span></p>
+        <div class="tipbody" id="t4"><b>Why the number goes first.</b> The job name is the one field that
+        shows up on every A/R report automatically, so putting the number there means it's always on the
+        export with nothing extra to remember. It also sorts the QuickBooks list the same way the job folders
+        sort on the server — <span class="m">A11331</span>, <span class="m">P11526</span> — so the two match
+        at a glance. P.O. No. and custom fields were the alternatives, but both depend on someone filling
+        them in every time.</div>
+        <div class="warn"><b>Don't rename a job later.</b> Once invoices exist against a job name, changing
+        it breaks the match between QuickBooks and the portal. If a name is wrong, tell Bill rather than
+        editing it — it's a two-minute fix on the portal side.</div>
+      </div></div></div>
+
+  <!-- STEP 4 -->
+  <div class="step"><div class="num qb">4</div>
+    <div class="card qb"><div class="ct"><h3>Fill the Job Info tab</h3><span class="where qb">QuickBooks Enterprise</span></div>
+      <div class="cb">
+        <p>Click the <b>Job Info</b> tab and fill what's useful. None of it is required for the portal to
+        work, but it makes the QuickBooks side readable on its own.</p>
+        <table class="fieldtable">
+          <thead><tr><th>Field</th><th>What to put</th></tr></thead>
+          <tbody>
+            <tr><td class="f">Job Description</td><td>The scope from the queue card — e.g. Facade restoration, east and south elevations</td></tr>
+            <tr><td class="f">Job Type</td><td>The scope type — Facade Restoration, FISP Repairs, Roof Replacement</td></tr>
+            <tr><td class="f">Job Status</td><td>Awarded when it's set up; In Progress once work starts</td></tr>
+            <tr><td class="f">Start Date</td><td>Leave blank until the job actually mobilizes<span class="tip" data-tip="t5">?</span></td></tr>
+          </tbody>
+        </table>
+        <div class="tipbody" id="t5"><b>There's normally a 2–3 month gap</b> between a job being awarded and
+        work being scheduled. Setting a start date at award time makes every job look overdue. Fill it in
+        when the PM says they're mobilizing.</div>
+      </div></div></div>
+
+  <!-- STEP 5 -->
+  <div class="step"><div class="num app">5</div>
+    <div class="card app"><div class="ct"><h3>Paste the path back into the portal</h3><span class="soon">Not built yet</span><span class="where app">Portal</span></div>
+      <div class="cb">
+        <p>Copy the exact <code>Customer:Job</code> you just created and paste it into the box on the queue
+        card, then click <b>Mark Created in QuickBooks</b>.</p>
+        <p>That's the whole handoff. From then on, every invoice you write against that job matches itself
+        to the right project in the portal automatically.<span class="tip" data-tip="t6">?</span></p>
+        <div class="tipbody" id="t6"><b>Why we ask you to paste rather than letting the app guess.</b> The
+        app suggests a name, but you might adjust it — a longer building name, a different scope wording.
+        Whatever you actually type in QuickBooks is what the invoices will carry, so the portal stores your
+        version, not its own. That one paste is what keeps the two systems from drifting apart.</div>
+      </div></div></div>
+
+  <!-- STEP 6 -->
+  <div class="step"><div class="num qb">6</div>
+    <div class="card qb"><div class="ct"><h3>Invoice as you do today</h3><span class="where qb">QuickBooks Enterprise</span></div>
+      <div class="cb">
+        <p>Nothing changes here. Progress billing, AIA pay applications, retainage — all exactly as you run
+        it now. Two small habits worth keeping consistent:</p>
+        <ul class="clean">
+          <li><b>Rep</b> — set it to the project manager on the job. The portal reads this column to route
+          each invoice to the right PM's view.<span class="tip" data-tip="t7">?</span></li>
+          <li><b>P.O. No.</b> — if the client gives you a PO number, put it here. Useful for them, harmless
+          for us.</li>
+        </ul>
+        <div class="tipbody" id="t7"><b>This one saves you the per-PM tabs.</b> Right now the A/R export gets
+        split into separate sheets for each PM group by hand. The portal reads the Rep column and does that
+        automatically, so each PM sees their own jobs and nobody else's. Same result, no spreadsheet work.</div>
+      </div></div></div>
+
+  <!-- WEEKLY -->
+  <div class="weekly">
+    <h2>The weekly A/R upload — about two minutes<span class="soon">Not built yet</span></h2>
+    <p>This replaces building the status PDF by hand. Once it's uploaded, the whole team sees paid, unpaid
+    and aging on their own jobs without asking you.</p>
+    <ol>
+      <li>Reports <b>→</b> Memorized Reports <b>→</b> <b>PORTAL – A/R Aging Detail</b></li>
+      <li>Change the report date to today. Nothing else.</li>
+      <li>Export to <b>Excel or CSV</b> — not PDF <span class="tip" data-tip="t8">?</span></li>
+      <li>In the portal: <b>A/R → Upload A/R report</b>, pick the file, done.</li>
+    </ol>
+    <div class="tipbody" id="t8" style="background:rgba(0,0,0,.25);border-color:var(--qb-line);color:#88E0AB">
+      <b>This is the one habit change in the whole runbook.</b> A PDF is a picture — the app can't read the
+      numbers out of it. Excel or CSV carries the actual figures, which is what lets the team see live
+      status instead of waiting on a report. Same report, same memorized settings, different export button.</div>
+  </div>
+
+  <div class="foot">
+    <div><b>Kane PC</b> — Managed IT &amp; Custom Application Development</div>
+    <div>Pyramid Restoration Staff Portal · billing runbook · draft for review</div>
+  </div>
+</div>
+
+<script>
+document.querySelectorAll(".tip").forEach(t=>{
+  t.onclick=()=>{
+    const b=document.getElementById(t.dataset.tip);
+    if(b)b.classList.toggle("open");
+  };
+});
+</script>
+</body>
+</html>
