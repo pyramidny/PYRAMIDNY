@@ -225,16 +225,22 @@ written onto a row nobody can sign into.
 
 ### Still to build
 
-**The POLICY rewrite is the real remaining work.** This change altered what
-people *are*; it did not touch what they can *do*. `permissions.js` and its
-`project-proxy` mirror still read `["admin"]` for `create_project`,
-`update_project_fields`, `upload_file`, `assign_team` and `edit_milestones`,
-where Jorge's matrix opens create-bid to Overseer/Director/Task Manager and file
-upload to everyone. Both files must change together — they are a deliberate
-mirror.
+**The POLICY rewrite is DONE** (Sep 2026) — see
+`SOLVED_policy_rewrite_jorge_matrix.md`. `permissions.js` and the
+`project-proxy` mirror now carry all 21 capabilities transcribed from Jorge's
+matrix, and every mutating proxy action runs through a single `allow()` gate.
 
-Also unbuilt: the matrix's project-visibility scoping (All / All in div /
-Assigned). `division` remains display-only until that lands.
+Two things the rewrite deliberately did NOT solve:
+
+- **The ◐ rows are granted unscoped.** Jorge marks Edit project details, stage,
+  assign team, assign task, production/milestones and create/edit client as
+  "scoped to their division / assigned jobs". There is no visibility predicate
+  yet, so all six are enforced as a flat yes. The list lives in `SCOPED` in
+  `permissions.js`. This is the largest remaining piece of the matrix.
+- **Nothing here is a security boundary yet.** `project-proxy` decodes the JWT
+  with `atob()` and never verifies its signature, and Supabase JWT verification
+  is off for the function. Until that is fixed, POLICY governs honest clients
+  only. See the security section of the policy-rewrite writeup.
 
 ### Regression watch
 

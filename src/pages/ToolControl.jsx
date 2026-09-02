@@ -6,8 +6,8 @@
 //            maintenance / retire), Azure-AD token from localStorage.
 // Internal tabs are driven by ?tab= so the mobile bottom bar (Layout.jsx)
 // and the desktop top-tab strip share the same state.
-// Access: everyone can scan / view. Enrolling tools is gated to
-//   isAdmin || profile.role === 'tool_manager'.
+// Access: anyone with the Tool hat can scan / view. Enrolling, editing and
+// retiring tools are gated to the Tool ADMIN tier — canTool(profile, 'admin').
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
@@ -18,6 +18,7 @@ import {
 import QRCode from 'qrcode'
 import { Html5Qrcode } from 'html5-qrcode'
 import { useAuth } from '@/context/AuthContext'
+import { canTool } from '@/lib/permissions'
 import { supabase } from '@/lib/supabase'
 
 /* ---------------------------------------------------------------- config */
@@ -145,11 +146,14 @@ function PhotoPicker({ photos, onChange, max = 2, label = 'Photos (optional)' })
 
 /* ---------------------------------------------------------------- page */
 export default function ToolControl() {
-  const { isAdmin, profile } = useAuth()
+  const { profile } = useAuth()
   // Tool ADMIN tier only — see the note in Layout.jsx. Tool Tech keeps scan,
   // checkout and activity, which are open to any authenticated user.
-  const canManage =
-    isAdmin || profile?.tool_access === 'admin' || profile?.role === 'tool_manager'
+  const canManage = canTool(profile, 'admin')
+  // Tool TECH tier: maintenance, QR tags, utilisation reports. Viewing the
+  // catalog and checking tools in/out are open to every role, hat or not —
+  // that is the "Basic use (any role)" column in Jorge's Tool Control table.
+  const canServiceTools = canTool(profile, 'tech')
 
   const [params, setParams] = useSearchParams()
   let tab = params.get('tab') || 'scan'
@@ -379,6 +383,7 @@ export default function ToolControl() {
           onClose={() => { setOpenId(null); setSheetMode(null) }}
           onCheckout={checkout} onCheckin={checkin} onMaint={maint}
           onReturn={returnService} onPrint={() => setTagId(openTool.assetId)}
+          canService={canServiceTools}
         />
       )}
       {tagTool && <TagModal tool={tagTool} onClose={() => setTagId(null)} />}
@@ -598,7 +603,7 @@ function EnrollTab({ nextId, onEnroll }) {
 }
 
 /* ---------------------------------------------------------------- Tool sheet */
-function ToolSheet({ tool, mode, setMode, techs, jobs, onClose, onCheckout, onCheckin, onMaint, onReturn, onPrint }) {
+function ToolSheet({ tool, mode, setMode, techs, jobs, onClose, onCheckout, onCheckin, onMaint, onReturn, onPrint, canService }) {
   const [tech, setTech] = useState(techs[0]?.id ?? '')
   const [job, setJob] = useState('')
   const [exp, setExp] = useState('')
@@ -624,7 +629,9 @@ function ToolSheet({ tool, mode, setMode, techs, jobs, onClose, onCheckout, onCh
         <div className="p-5 space-y-5">
           <div className="flex items-center justify-between">
             <Pill tool={tool} />
-            <button onClick={onPrint} className="text-sm font-semibold text-ink-900 flex items-center gap-1.5"><Printer size={16} /> Print tag</button>
+            {canService && (
+              <button onClick={onPrint} className="text-sm font-semibold text-ink-900 flex items-center gap-1.5"><Printer size={16} /> Print tag</button>
+            )}
           </div>
 
           {tool.status === 'out' && (
@@ -667,12 +674,12 @@ function ToolSheet({ tool, mode, setMode, techs, jobs, onClose, onCheckout, onCh
             <div className="space-y-2.5">
               {tool.status === 'available' && <button onClick={() => setMode('out')} className="btn-primary w-full">Check out</button>}
               {tool.status === 'out' && <button onClick={() => setMode('in')} className="w-full py-3 rounded-lg font-semibold text-white bg-emerald-600 hover:bg-emerald-500">Check in</button>}
-              {tool.status !== 'maintenance' && tool.status !== 'retired' && (
+              {canService && tool.status !== 'maintenance' && tool.status !== 'retired' && (
                 <button onClick={run(() => onMaint(tool))} disabled={busy} className="w-full py-3 rounded-lg font-semibold text-amber-700 bg-white border border-amber-300 flex items-center justify-center gap-2 disabled:opacity-50">
                   <Wrench size={16} /> Send to maintenance
                 </button>
               )}
-              {tool.status === 'maintenance' && <button onClick={run(() => onReturn(tool))} disabled={busy} className="w-full py-3 rounded-lg font-semibold text-white bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50">Return to service (Available)</button>}
+              {canService && tool.status === 'maintenance' && <button onClick={run(() => onReturn(tool))} disabled={busy} className="w-full py-3 rounded-lg font-semibold text-white bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50">Return to service (Available)</button>}
             </div>
           )}
 

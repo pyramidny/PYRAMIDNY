@@ -5,6 +5,7 @@ import {
   HardHat, Anchor, Bell, Building2, ScanLine
 } from 'lucide-react'
 import { useAuth } from '@/context/AuthContext'
+import { can } from '@/lib/permissions'
 
 const DIVISION_LABELS = {
   regular: { label: 'Regular',     color: 'text-regular', dot: 'bg-regular' },
@@ -41,8 +42,8 @@ const NAV_SECTIONS = [
   {
     heading: 'Manage',
     items: [
-      { to: '/clients',  icon: Building2, label: 'Clients' },
-      { to: '/tools',    icon: ScanLine, label: 'Tool Control', toolOnly: true },
+      { to: '/clients',  icon: Building2, label: 'Clients', cap: 'view_clients' },
+      { to: '/tools',    icon: ScanLine, label: 'Tool Control' },
       { to: '/team',     icon: Users,    label: 'Team',     adminOnly: true },
       { to: '/settings', icon: Settings, label: 'Settings' },
     ],
@@ -55,15 +56,11 @@ export function Sidebar({ onClose }) {
 
   const divInfo = DIVISION_LABELS[profile?.division] ?? DIVISION_LABELS[null]
 
-  // Tool Control is reachable by anyone carrying the tool hat at either tier —
-  // it used to be adminOnly, which would have hidden the nav item from the very
-  // people the hat exists for (the warehouse account, Nina, Jesus).
-  // The `tool_manager` clause is transitional: 12_role_model_jorge8.sql
-  // backfills those holders onto tool_access, after which it can be deleted.
-  const canSeeTools =
-    isAdmin ||
-    (profile?.tool_access && profile.tool_access !== 'none') ||
-    profile?.role === 'tool_manager'
+  // NOTE: Tool Control has no nav gate at all. Jorge's Tool Control table has a
+  // "Basic use (any role)" column covering "view tool catalog & who has what"
+  // and "check a tool out / in" — no hat required. The hat tiers gate what you
+  // can do once inside (maintenance/QR/reports at tech, catalog changes at
+  // admin), which ToolControl.jsx and the proxy enforce.
 
   async function handleSignOut() {
     await signOut()
@@ -90,7 +87,7 @@ export function Sidebar({ onClose }) {
       <nav className="flex-1 overflow-y-auto px-3 py-4 space-y-6">
         {NAV_SECTIONS.map((section, si) => {
           const visibleItems = section.items.filter(
-            item => (!item.adminOnly || isAdmin) && (!item.toolOnly || canSeeTools)
+            item => (!item.adminOnly || isAdmin) && (!item.cap || can(item.cap, profile?.role))
           )
           if (!visibleItems.length) return null
 

@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useMemo } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/context/AuthContext'
-import { useCanDo, useIsAdmin } from '@/lib/permissions'
+import { useCanDo } from '@/lib/permissions'
 
 const PROXY_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/project-proxy`
 const SP_TOKEN_KEY = 'sb-izjaxmcdlsdkdliqjlei-auth-token'
@@ -154,7 +154,6 @@ export default function ProjectDetail() {
   const navigate = useNavigate()
   const { session, profile } = useAuth()
   const canDo = useCanDo()
-  const isAdmin = useIsAdmin()
 
   const [project, setProject] = useState(null)
   const [milestones, setMilestones] = useState([])
@@ -684,7 +683,7 @@ export default function ProjectDetail() {
               </div>
             )}
 
-            {isAdmin && (
+            {canDo('advance_stage') && (
               <>
                 <div className="flex flex-wrap items-center gap-2 mt-4">
                   <button

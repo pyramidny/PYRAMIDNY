@@ -8,6 +8,7 @@ import {
 import { Sidebar } from './Sidebar'
 import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/context/AuthContext'
+import { canTool } from '@/lib/permissions'
 
 const PAGE_TITLES = {
   '/dashboard': 'Dashboard',
@@ -48,8 +49,7 @@ export function Layout() {
   const toolTab = new URLSearchParams(location.search).get('tab') || 'scan'
   // Enroll/edit/retire is the Tool ADMIN tier per Jorge's matrix; Tool Tech gets
   // checkout, maintenance, QR tags and reports but cannot change the catalog.
-  const canManageTools =
-    isAdmin || profile?.tool_access === 'admin' || profile?.role === 'tool_manager'
+  const canManageTools = canTool(profile, 'admin')
   const TOOL_TABS = [
     { key: 'dashboard', to: '/dashboard',        label: 'Dashboard', icon: LayoutDashboard, back: true },
     { key: 'scan',      to: '/tools?tab=scan',     label: 'Scan',      icon: ScanLine },

@@ -4,6 +4,42 @@ Append new entries to the top. Format: SOLVED / PROBLEM / FIX / HAND-OFF.
 
 ---
 
+## SOLVED — Task Manager couldn't manage tasks: the POLICY rewrite
+*Date: 2026-09-02 — full write-up: `docs/SOLVED_policy_rewrite_jorge_matrix.md`*
+
+**PROBLEM**
+Aashtha Baniya (Task Manager) could not edit or assign tasks. Her role was
+correct in the DB — `permissions.js` had simply never been taught the 8-role
+vocabulary. It still read `assign_task: ["admin","director_of_operations"]` and
+`edit_any_task: ["admin"]`. Same root cause left Overseer with zero
+capabilities, the Tool hat 403ing on `role === "tool_manager"` (a retired role),
+and the Billing hat inert. Separately, seven capabilities the UI advertised as
+admin-only had **no server check at all** — the "own tasks only" rule lived only
+in `ProjectDetail.jsx`, so any signed-in user could complete any task on any
+project through the proxy.
+
+**FIX**
+Transcribed Jorge's Sep 2026 capability matrix into a 21-entry POLICY table
+mirrored byte-for-byte in `permissions.js` and `project-proxy/index.ts`, and
+routed every mutating proxy action through one `allow()` gate (declared as a
+type predicate so `caller` narrows to non-null). Two corrections ran *against*
+seniority intuition: Overseer loses `assign_task`, PM gains it. The generic
+`update` action now picks its capability from the payload keys, because stage,
+status and field edits share one action but score differently in the matrix.
+Hats became ranked ladders (`canTool`/`canBill`) rather than equality checks;
+basic tool use needs no hat at all.
+
+**HAND-OFF**
+`supabase functions deploy project-proxy` — nothing changes until it ships, and
+the frontend now shows controls the old deployed function will 403. Two things
+this does NOT fix: the ◐ "scoped to assigned jobs" rows are granted unscoped
+(see `SCOPED` in permissions.js), and the proxy still `atob()`s the JWT without
+verifying its signature, so POLICY governs honest clients only. Three legacy
+edge functions (`create-project`, `update-project`, `upsert-production`) bypass
+it entirely and should be deleted.
+
+---
+
 ## SOLVED — Jorge's 8 roles wouldn't fit the 12-value user_role enum
 *Date: 2026-08-31 — full write-up: `docs/SOLVED_role_model_and_access_hats.md`*
 

@@ -186,6 +186,101 @@ const VALID_TOOL_ACCESS = ["none", "tech", "admin"];
 const VALID_BILLING_ACCESS = ["none", "view", "admin"];
 
 // ============================================================================
+// PERMISSION POLICY  ── mirror of src/lib/permissions.js ──
+// ============================================================================
+// THIS is the enforcer. permissions.js only hides buttons; anyone can call this
+// function directly with a valid JWT, so every mutating action must run through
+// `deny()` below. Change a capability here and in permissions.js together —
+// they are a deliberate mirror and drift between them is a security hole, not a
+// cosmetic bug.
+//
+// Legacy job-title roles (sales_rep, office_manager, tool_manager, …) appear in
+// no array on purpose: the 8-role model retired them, so a holder has the
+// capabilities of no role until they are remapped in Team Management.
+
+const SENIOR = ["admin", "overseer", "director_of_operations"];
+const NOT_FIELD = [...SENIOR, "task_manager", "project_manager",
+                   "assistant_pm", "estimator"];
+
+// ⚠ Capabilities Jorge marked ◐ ("scoped to their division / assigned jobs")
+// are granted UNSCOPED here, because the app has no project-visibility
+// predicate yet. See the SCOPED list in permissions.js for the work queue.
+const POLICY: Record<string, string[]> = {
+  create_project:        [...SENIOR, "task_manager"],
+  update_project_fields: ["admin", "director_of_operations", "task_manager",
+                          "project_manager"],
+  update_project_status: ["admin", "director_of_operations", "task_manager",
+                          "project_manager"],
+  advance_stage:         ["admin", "director_of_operations", "project_manager"],
+  delete_project:        ["admin"],
+  backfill_project:      ["admin"],
+
+  assign_team:           ["admin", "director_of_operations", "task_manager"],
+
+  assign_task:           ["admin", "director_of_operations", "task_manager",
+                          "project_manager"],
+  toggle_own_task:       ["*"],
+  // Not in Jorge's matrix — inferred to match assign_task. See permissions.js.
+  edit_any_task:         ["admin", "director_of_operations", "task_manager",
+                          "project_manager"],
+
+  edit_production:       ["admin", "director_of_operations", "project_manager"],
+  edit_milestones:       ["admin", "director_of_operations", "project_manager"],
+
+  upload_file:           ["*"],
+  delete_file:           ["admin"],
+
+  manage_staff:          ["admin"],
+
+  // "View client list" is ✓ on every role except Field Tech, so not "*".
+  // ⚠ Client reads bypass this function entirely (ClientList.jsx queries
+  // supabase-js directly), so this entry documents intent — the enforcement
+  // that matters is the RLS policy on `clients`.
+  view_clients:          NOT_FIELD,
+  create_client:         ["admin", "director_of_operations", "task_manager",
+                          "project_manager"],
+  edit_client:           ["admin", "director_of_operations", "task_manager",
+                          "project_manager"],
+  delete_client:         ["admin"],
+  move_site:             ["admin"],
+  backfill_folders:      ["admin"],
+};
+
+type Caller = {
+  id: string;
+  email: string;
+  role: string;
+  is_active: boolean;
+  tool_access: string;
+  billing_access: string;
+} | null;
+
+// Ranked ladders — 'admin' implies 'tech'/'view'. Compare by rank, never by
+// equality, or the tier above silently loses access.
+const TOOL_RANK: Record<string, number> = { none: 0, tech: 1, admin: 2 };
+const BILLING_RANK: Record<string, number> = { none: 0, view: 1, admin: 2 };
+
+function hasTool(caller: Caller, tier = "tech"): caller is NonNullable<Caller> {
+  if (!caller || !caller.is_active) return false;
+  if (caller.role === "admin") return true;
+  return (TOOL_RANK[caller.tool_access] ?? 0) >= (TOOL_RANK[tier] ?? 99);
+}
+
+function hasBilling(caller: Caller, tier = "view"): caller is NonNullable<Caller> {
+  if (!caller || !caller.is_active) return false;
+  if (caller.role === "admin") return true;
+  return (BILLING_RANK[caller.billing_access] ?? 0) >= (BILLING_RANK[tier] ?? 99);
+}
+
+function allow(action: string, caller: Caller): caller is NonNullable<Caller> {
+  const allowed = POLICY[action];
+  if (!allowed) return false;              // unknown capability = closed
+  if (!caller || !caller.is_active) return false;
+  if (allowed.includes("*")) return true;
+  return allowed.includes(caller.role);
+}
+
+// ============================================================================
 // Helpers
 // ============================================================================
 
@@ -387,7 +482,7 @@ async function lookupCallerProfile(userId: string, jwtPayload: Record<string, un
   // Try azure_oid first (fast path for users whose profile was created by the trigger)
   const { data: byOid } = await supabase
     .from("profiles")
-    .select("id, email, role, is_active, azure_oid")
+    .select("id, email, role, is_active, azure_oid, tool_access, billing_access")
     .eq("azure_oid", userId)
     .maybeSingle();
   if (byOid) return byOid;
@@ -402,7 +497,7 @@ async function lookupCallerProfile(userId: string, jwtPayload: Record<string, un
   const normalizedEmail = String(email).toLowerCase().trim();
   const { data: byEmail } = await supabase
     .from("profiles")
-    .select("id, email, role, is_active, azure_oid")
+    .select("id, email, role, is_active, azure_oid, tool_access, billing_access")
     .ilike("email", normalizedEmail)
     .maybeSingle();
   if (!byEmail) return null;
@@ -494,6 +589,10 @@ serve(async (req) => {
     // INSERT PROJECT
     // ------------------------------------------------------------------------
     if (action === "insert") {
+      const caller = await lookupCallerProfile(userId, payload);
+      if (!allow("create_project", caller)) {
+        return json({ error: "Not authorized to create projects" }, 403);
+      }
       const { data: newProject, error: insertErr } = await supabase
         .from("projects")
         .insert({ ...project, created_by: userId })
@@ -573,6 +672,10 @@ serve(async (req) => {
     // BACKFILL PROJECT
     // ------------------------------------------------------------------------
     if (action === "backfill_project") {
+      const caller = await lookupCallerProfile(userId, payload);
+      if (!allow("backfill_project", caller)) {
+        return json({ error: "Not authorized to backfill projects" }, 403);
+      }
       const targetId = id || projectId;
       if (!targetId) return json({ error: "projectId required" }, 400);
 
@@ -631,8 +734,20 @@ serve(async (req) => {
     if (action === "update") {
       if (!projectId) return json({ error: "projectId required" }, 400);
       const caller = await lookupCallerProfile(userId, payload);
-      if (!caller || caller.role !== "admin") {
-        return json({ error: "Admin only" }, 403);
+      // `update` is the generic field writer, but ProjectDetail also routes
+      // stage and status changes through it — and Jorge's matrix scores those
+      // rows differently ("Advance or change project stage" is — for Task
+      // Manager, while "Edit project details" is ◐). So the capability is
+      // chosen from what the payload actually touches; checking only
+      // update_project_fields would hand every field-editor the stage control.
+      const touched = Object.keys(updates ?? {});
+      const needed = touched.includes("current_stage")
+        ? "advance_stage"
+        : touched.includes("status")
+        ? "update_project_status"
+        : "update_project_fields";
+      if (!allow(needed, caller)) {
+        return json({ error: "Not authorized to make this change" }, 403);
       }
       const { data, error } = await supabase.from("projects")
         .update({ ...updates, updated_at: new Date().toISOString() })
@@ -645,6 +760,10 @@ serve(async (req) => {
     // UPDATE PROJECT TEAM
     // ------------------------------------------------------------------------
     if (action === "update_project") {
+      const caller = await lookupCallerProfile(userId, payload);
+      if (!allow("assign_team", caller)) {
+        return json({ error: "Not authorized to change the project team" }, 403);
+      }
       const targetId = id || projectId;
       if (!targetId) return json({ error: "id required" }, 400);
       const { pm_id, assistant_pm_id } = body;
@@ -664,10 +783,31 @@ serve(async (req) => {
     // ------------------------------------------------------------------------
     if (action === "update_task") {
       if (!taskId) return json({ error: "taskId required" }, 400);
+      const caller = await lookupCallerProfile(userId, payload);
+      if (!caller || !caller.is_active) return json({ error: "Profile not found" }, 403);
+
+      // Two ways in: edit_any_task, or it is your own task (toggle_own_task).
+      // Until now this action had NO check at all — the "not assigned to you"
+      // rule lived only in ProjectDetail.jsx, so any signed-in user could
+      // complete or reopen any task on any project by calling this directly.
+      const { data: existing, error: existErr } = await supabase
+        .from("project_tasks")
+        .select("id, assigned_to_id")
+        .eq("id", taskId)
+        .single();
+      if (existErr || !existing) return json({ error: "Task not found" }, 404);
+
+      const isOwnTask = !!existing.assigned_to_id && existing.assigned_to_id === caller.id;
+      if (!allow("edit_any_task", caller) && !isOwnTask) {
+        return json({ error: "Not authorized to edit this task" }, 403);
+      }
+
       const taskUpdate: Record<string, unknown> = { ...updates, updated_at: new Date().toISOString() };
       if (updates?.status === "completed" && !updates.completed_at) {
         taskUpdate.completed_at = new Date().toISOString();
-        taskUpdate.completed_by = userId;
+        // caller.id, not userId: userId is the Azure OID from the JWT, while
+        // every other person-column on this table stores a profiles.id.
+        taskUpdate.completed_by = caller.id;
       }
       const { data, error } = await supabase.from("project_tasks")
         .update(taskUpdate).eq("id", taskId).select().single();
@@ -676,14 +816,13 @@ serve(async (req) => {
     }
 
     // ------------------------------------------------------------------------
-    // ASSIGN TASK — admin + director_of_operations only
+    // ASSIGN TASK — POLICY.assign_task
     // Writes assigned_to_id, fires in-app notification, queues alert_log for email.
-    // To open to more roles: add them to the POLICY block in permissions.js AND here.
+    // To open to more roles: edit POLICY above AND permissions.js.
     // ------------------------------------------------------------------------
     if (action === "assign_task") {
       const caller = await lookupCallerProfile(userId, payload);
-      const allowedRoles = ["admin", "director_of_operations"];
-      if (!caller || !allowedRoles.includes(caller.role)) {
+      if (!allow("assign_task", caller)) {
         return json({ error: "Not authorized to assign tasks" }, 403);
       }
 
@@ -775,6 +914,10 @@ serve(async (req) => {
     // UPDATE MILESTONE
     // ------------------------------------------------------------------------
     if (action === "update_milestone") {
+      const caller = await lookupCallerProfile(userId, payload);
+      if (!allow("edit_milestones", caller)) {
+        return json({ error: "Not authorized to edit milestones" }, 403);
+      }
       if (!milestoneId) return json({ error: "milestoneId required" }, 400);
       if (!updates || typeof updates !== "object") {
         return json({ error: "updates object required" }, 400);
@@ -795,7 +938,7 @@ serve(async (req) => {
         return json({ error: "No valid fields to update" }, 400);
       }
 
-      allowed.updated_by = userId;
+      allowed.updated_by = caller.id;   // profiles.id, not the JWT's Azure OID
       allowed.updated_at = new Date().toISOString();
 
       const { data, error } = await supabase.from("project_milestones")
@@ -810,6 +953,13 @@ serve(async (req) => {
     // UPLOAD FILE — now with proper category subfolder path
     // ------------------------------------------------------------------------
     if (action === "upload_file") {
+      // POLICY.upload_file is "*" per Jorge's matrix, so this is an active-user
+      // check rather than a role check — but it still has to be here, or a
+      // deactivated account with a live JWT keeps write access to SharePoint.
+      const caller = await lookupCallerProfile(userId, payload);
+      if (!allow("upload_file", caller)) {
+        return json({ error: "Not authorized to upload files" }, 403);
+      }
       const targetId = projectId || id;
       const { category, fileName, fileContent, document_type } = body;
       if (!targetId || !fileName || !fileContent) {
@@ -867,6 +1017,10 @@ serve(async (req) => {
     // DELETE FILE — soft-delete in DB, optionally remove from SharePoint
     // ------------------------------------------------------------------------
     if (action === "delete_file") {
+      const caller = await lookupCallerProfile(userId, payload);
+      if (!allow("delete_file", caller)) {
+        return json({ error: "Not authorized to delete files" }, 403);
+      }
       const docId = body.documentId;
       if (!docId) return json({ error: "documentId required" }, 400);
 
@@ -902,7 +1056,7 @@ serve(async (req) => {
     // ------------------------------------------------------------------------
     if (action === "upsert_whitelist") {
       const caller = await lookupCallerProfile(userId, payload);
-      if (!caller || caller.role !== "admin") {
+      if (!allow("manage_staff", caller)) {
         return json({ error: "Admin only" }, 403);
       }
 
@@ -982,7 +1136,7 @@ serve(async (req) => {
     // ------------------------------------------------------------------------
     if (action === "update_profile") {
       const caller = await lookupCallerProfile(userId, payload);
-      if (!caller || caller.role !== "admin") {
+      if (!allow("manage_staff", caller)) {
         return json({ error: "Admin only" }, 403);
       }
 
@@ -1052,7 +1206,7 @@ serve(async (req) => {
     // ------------------------------------------------------------------------
     if (action === "deactivate_staff") {
       const caller = await lookupCallerProfile(userId, payload);
-      if (!caller || caller.role !== "admin") {
+      if (!allow("manage_staff", caller)) {
         return json({ error: "Admin only" }, 403);
       }
 
@@ -1084,7 +1238,7 @@ serve(async (req) => {
     // ------------------------------------------------------------------------
     if (action === "reactivate_staff") {
       const caller = await lookupCallerProfile(userId, payload);
-      if (!caller || caller.role !== "admin") {
+      if (!allow("manage_staff", caller)) {
         return json({ error: "Admin only" }, 403);
       }
 
@@ -1114,7 +1268,7 @@ serve(async (req) => {
     // ------------------------------------------------------------------------
     if (action === "hard_delete_staff") {
       const caller = await lookupCallerProfile(userId, payload);
-      if (!caller || caller.role !== "admin") {
+      if (!allow("manage_staff", caller)) {
         return json({ error: "Admin only" }, 403);
       }
 
@@ -1203,7 +1357,10 @@ serve(async (req) => {
     if (action === "enroll_tool") {
       const caller = await lookupCallerProfile(userId, payload);
       if (!caller || !caller.is_active) return json({ error: "No active profile" }, 403);
-      if (!["admin", "tool_manager"].includes(caller.role)) {
+      // Tool ADMIN tier. Was gated on role === "tool_manager", a role the
+      // 8-role model retired — after 13_seed_access_matrix.sql nobody holds it,
+      // so every hat-holder was 403ing on a button the sidebar still showed.
+      if (!hasTool(caller, "admin")) {
         return json({ error: "Not authorized to enroll tools" }, 403);
       }
       const t = body.tool ?? {};
@@ -1252,6 +1409,10 @@ serve(async (req) => {
     }
 
     // CHECK OUT a tool to a tech + job ---------------------------------------
+    // Open to any active profile ON PURPOSE: "Check a tool out / in" sits in the
+    // "Basic use (any role)" column of Jorge's Tool Control table, so it needs
+    // no hat. Maintenance, QR tags and reports are the tech tier; the catalog
+    // is the admin tier.
     if (action === "checkout_tool") {
       const caller = await lookupCallerProfile(userId, payload);
       if (!caller || !caller.is_active) return json({ error: "No active profile" }, 403);
@@ -1322,7 +1483,11 @@ serve(async (req) => {
     // MAINTENANCE toggle (send to / return from) -----------------------------
     if (action === "tool_maintenance") {
       const caller = await lookupCallerProfile(userId, payload);
-      if (!caller || !caller.is_active) return json({ error: "No active profile" }, 403);
+      // Tool TECH tier. "Log maintenance" is ✓ for Tool Admin and Tool Tech and
+      // — for basic use, unlike check-out/check-in which any role may do.
+      if (!hasTool(caller, "tech")) {
+        return json({ error: "Not authorized to log tool maintenance" }, 403);
+      }
       const { toolId, condition, note, back } = body;
       if (!toolId) return json({ error: "toolId required" }, 400);
 
@@ -1338,11 +1503,14 @@ serve(async (req) => {
       return json({ data: tool });
     }
 
-    // RETIRE a tool (admin || tool_manager) ----------------------------------
+    // RETIRE a tool (Tool Admin hat) -----------------------------------------
     if (action === "retire_tool") {
       const caller = await lookupCallerProfile(userId, payload);
       if (!caller || !caller.is_active) return json({ error: "No active profile" }, 403);
-      if (!["admin", "tool_manager"].includes(caller.role)) {
+      // Tool ADMIN tier. Was gated on role === "tool_manager", a role the
+      // 8-role model retired — after 13_seed_access_matrix.sql nobody holds it,
+      // so every hat-holder was 403ing on a button the sidebar still showed.
+      if (!hasTool(caller, "admin")) {
         return json({ error: "Not authorized to retire tools" }, 403);
       }
       const { toolId, note } = body;
@@ -1362,11 +1530,14 @@ serve(async (req) => {
       return json({ data: tool });
     }
 
-    // UPDATE catalog fields (admin || tool_manager) — never touches state ----
+    // UPDATE catalog fields (Tool Admin hat) — never touches state ---------
     if (action === "update_tool") {
       const caller = await lookupCallerProfile(userId, payload);
       if (!caller || !caller.is_active) return json({ error: "No active profile" }, 403);
-      if (!["admin", "tool_manager"].includes(caller.role)) {
+      // Tool ADMIN tier. Was gated on role === "tool_manager", a role the
+      // 8-role model retired — after 13_seed_access_matrix.sql nobody holds it,
+      // so every hat-holder was 403ing on a button the sidebar still showed.
+      if (!hasTool(caller, "admin")) {
         return json({ error: "Not authorized to edit tools" }, 403);
       }
       const toolId = body.toolId || id;
@@ -1406,7 +1577,9 @@ serve(async (req) => {
     // ---- CLIENTS -----------------------------------------------------------
     if (action === "client_create") {
       const caller = await lookupCallerProfile(userId, payload);
-      if (!caller) return json({ error: "Profile not found" }, 403);
+      if (!allow("create_client", caller)) {
+        return json({ error: "Not authorized to change client records" }, 403);
+      }
 
       const { client } = body;
       if (!client?.name) return json({ error: "Client name is required" }, 400);
@@ -1443,7 +1616,9 @@ serve(async (req) => {
 
     if (action === "client_update") {
       const caller = await lookupCallerProfile(userId, payload);
-      if (!caller) return json({ error: "Profile not found" }, 403);
+      if (!allow("edit_client", caller)) {
+        return json({ error: "Not authorized to change client records" }, 403);
+      }
       const { id: clientId, updates: clientUpdates } = body;
       if (!clientId) return json({ error: "clientId required" }, 400);
       const { data, error } = await supabase.from("clients")
@@ -1457,7 +1632,7 @@ serve(async (req) => {
     // a hard delete would either cascade or fail on the sites restrict FK.
     if (action === "client_delete") {
       const caller = await lookupCallerProfile(userId, payload);
-      if (!caller || caller.role !== "admin") return json({ error: "Admin only" }, 403);
+      if (!allow("delete_client", caller)) return json({ error: "Admin only" }, 403);
       const { id: clientId } = body;
       const { data, error } = await supabase.from("clients")
         .update({ is_active: false, updated_at: new Date().toISOString() })
@@ -1470,7 +1645,9 @@ serve(async (req) => {
     // Idempotent; safe to call on an already-promoted client.
     if (action === "client_promote") {
       const caller = await lookupCallerProfile(userId, payload);
-      if (!caller) return json({ error: "Profile not found" }, 403);
+      if (!allow("edit_client", caller)) {
+        return json({ error: "Not authorized to change client records" }, 403);
+      }
       const { id: clientId } = body;
       if (!clientId) return json({ error: "clientId required" }, 400);
       const { data, error } = await supabase.from("clients")
@@ -1484,7 +1661,9 @@ serve(async (req) => {
     // ---- SITES -------------------------------------------------------------
     if (action === "site_create") {
       const caller = await lookupCallerProfile(userId, payload);
-      if (!caller) return json({ error: "Profile not found" }, 403);
+      if (!allow("create_client", caller)) {
+        return json({ error: "Not authorized to change client records" }, 403);
+      }
 
       const { site } = body;
       if (!site?.client_id) return json({ error: "client_id is required" }, 400);
@@ -1526,7 +1705,9 @@ serve(async (req) => {
 
     if (action === "site_update") {
       const caller = await lookupCallerProfile(userId, payload);
-      if (!caller) return json({ error: "Profile not found" }, 403);
+      if (!allow("edit_client", caller)) {
+        return json({ error: "Not authorized to change client records" }, 403);
+      }
       const { id: siteId, updates: siteUpdates } = body;
       if (!siteId) return json({ error: "siteId required" }, 400);
       // client_id changes go through move_site so the folder follows.
@@ -1541,7 +1722,7 @@ serve(async (req) => {
 
     if (action === "site_delete") {
       const caller = await lookupCallerProfile(userId, payload);
-      if (!caller || caller.role !== "admin") return json({ error: "Admin only" }, 403);
+      if (!allow("delete_client", caller)) return json({ error: "Admin only" }, 403);
       const { id: siteId } = body;
       const { data, error } = await supabase.from("sites")
         .update({ is_active: false, updated_at: new Date().toISOString() })
@@ -1559,7 +1740,7 @@ serve(async (req) => {
     // agent.
     if (action === "move_site") {
       const caller = await lookupCallerProfile(userId, payload);
-      if (!caller || caller.role !== "admin") return json({ error: "Admin only" }, 403);
+      if (!allow("move_site", caller)) return json({ error: "Admin only" }, 403);
 
       const { siteId, newClientId } = body;
       if (!siteId || !newClientId) {
@@ -1600,10 +1781,17 @@ serve(async (req) => {
         }
       }
 
-      await writeAudit(caller.id, "move_site", {
-        site_id: siteId, site_name: site.name,
-        from_client: site.client_id, to_client: newClientId,
-      }).catch(() => {});
+      // Was called with three args against a 5-6 arg signature: the profile id
+      // landed in `email`, the payload object in `changedBy`, and old/new were
+      // never passed. The .catch() swallowed the resulting insert failure, so
+      // every site move audited as nothing at all.
+      await writeAudit(
+        caller.email,
+        "move_site",
+        caller.id,
+        { site_id: siteId, site_name: site.name, client_id: site.client_id },
+        { site_id: siteId, site_name: site.name, client_id: newClientId },
+      ).catch(() => {});
 
       return json({ data: moved, warning });
     }
@@ -1611,7 +1799,9 @@ serve(async (req) => {
     // ---- CONTACTS ----------------------------------------------------------
     if (action === "contact_create") {
       const caller = await lookupCallerProfile(userId, payload);
-      if (!caller) return json({ error: "Profile not found" }, 403);
+      if (!allow("create_client", caller)) {
+        return json({ error: "Not authorized to change client records" }, 403);
+      }
       const { contact, siteIds } = body;
       if (!contact?.client_id) return json({ error: "client_id is required" }, 400);
 
@@ -1630,7 +1820,9 @@ serve(async (req) => {
 
     if (action === "contact_update") {
       const caller = await lookupCallerProfile(userId, payload);
-      if (!caller) return json({ error: "Profile not found" }, 403);
+      if (!allow("edit_client", caller)) {
+        return json({ error: "Not authorized to change client records" }, 403);
+      }
       const { id: contactId, updates: contactUpdates, siteIds } = body;
       if (!contactId) return json({ error: "contactId required" }, 400);
 
@@ -1652,7 +1844,11 @@ serve(async (req) => {
 
     if (action === "contact_delete") {
       const caller = await lookupCallerProfile(userId, payload);
-      if (!caller) return json({ error: "Profile not found" }, 403);
+      // Soft delete of a contact row — edit tier, not delete_client (which
+      // governs the client record itself and stays Admin-only).
+      if (!allow("edit_client", caller)) {
+        return json({ error: "Not authorized to change client records" }, 403);
+      }
       const { id: contactId } = body;
       const { data, error } = await supabase.from("contacts")
         .update({ is_active: false, updated_at: new Date().toISOString() })
@@ -1663,7 +1859,9 @@ serve(async (req) => {
 
     if (action === "site_contact_add") {
       const caller = await lookupCallerProfile(userId, payload);
-      if (!caller) return json({ error: "Profile not found" }, 403);
+      if (!allow("create_client", caller)) {
+        return json({ error: "Not authorized to change client records" }, 403);
+      }
       const { siteId, contactId, roleNote } = body;
       if (!siteId || !contactId) return json({ error: "siteId and contactId required" }, 400);
       const { data, error } = await supabase.from("site_contacts")
@@ -1676,7 +1874,9 @@ serve(async (req) => {
 
     if (action === "site_contact_remove") {
       const caller = await lookupCallerProfile(userId, payload);
-      if (!caller) return json({ error: "Profile not found" }, 403);
+      if (!allow("edit_client", caller)) {
+        return json({ error: "Not authorized to change client records" }, 403);
+      }
       const { siteId, contactId } = body;
       const { error } = await supabase.from("site_contacts")
         .delete().eq("site_id", siteId).eq("contact_id", contactId);
@@ -1686,7 +1886,9 @@ serve(async (req) => {
 
     if (action === "project_contact_add") {
       const caller = await lookupCallerProfile(userId, payload);
-      if (!caller) return json({ error: "Profile not found" }, 403);
+      if (!allow("create_client", caller)) {
+        return json({ error: "Not authorized to change client records" }, 403);
+      }
       const { projectId: pid, contactId, roleNote } = body;
       if (!pid || !contactId) return json({ error: "projectId and contactId required" }, 400);
       const { data, error } = await supabase.from("project_contacts")
@@ -1699,7 +1901,9 @@ serve(async (req) => {
 
     if (action === "project_contact_remove") {
       const caller = await lookupCallerProfile(userId, payload);
-      if (!caller) return json({ error: "Profile not found" }, 403);
+      if (!allow("edit_client", caller)) {
+        return json({ error: "Not authorized to change client records" }, 403);
+      }
       const { projectId: pid, contactId } = body;
       const { error } = await supabase.from("project_contacts")
         .delete().eq("project_id", pid).eq("contact_id", contactId);
@@ -1712,7 +1916,7 @@ serve(async (req) => {
     // because a site folder needs its client folder to exist as a parent.
     if (action === "backfill_folders") {
       const caller = await lookupCallerProfile(userId, payload);
-      if (!caller || caller.role !== "admin") return json({ error: "Admin only" }, 403);
+      if (!allow("backfill_folders", caller)) return json({ error: "Admin only" }, 403);
       if (!providerToken) return json({ error: "No Graph token available" }, 503);
 
       const result = { clients: 0, sites: 0, failed: [] as string[] };
