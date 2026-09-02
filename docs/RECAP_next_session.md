@@ -22,6 +22,10 @@ Pilot-ready. 152/335/482 in the DB, correct numbering, 109 real numbers reconcil
 4. **Send Pyramid the 63 "Needs Review" import rows** (separate sheet in `Pyramid_Import_Preview.xlsx`) — jobs whose `Customer:Job` had no delimiter, need a site decision.
 5. **Folder provisioning** — Clients page "Create folders" provisions client/site folders for the **active set** only; do NOT bulk-provision all 152/335 (the single-call backfill would time out — needs batching before a full provision).
 
+6. **ProjectDetail — two small controls (surfaced in pilot use):**
+   - **Status control** — status and `current_stage` are decoupled by design, and there is currently *no UI to set status*, so a user can't change e.g. Job Closed -> Active Job. Add an admin dropdown of the `project_status` enum that writes `status` via `project-proxy` (`action:'update', updates:{status}`). Do NOT re-couple status to stage.
+   - **Per-project "Create folder" button** — imported jobs came in folder-less (DB-only). The Clients "Create folders" banner provisions client/site folders only, not a project's tree. Add a button on ProjectDetail (show when `sharepoint_folder_id is null`, admin) that calls the `backfill_project` proxy action.
+
 ## DEFERRED (post-cutover)
 - **Deploy C** — permits + insurance tables (the COI/CCI/DOB/DOT milestones + the demo's cert cards). Includes **milestone doc-attach** and **milestone reminder date**.
 - **Reskin** — start with theme-agnostic wins (breadcrumbs, stat cards, badges) on the current light theme; full dark theme + light/dark toggle is its own later pass (content area is light; ink-on-white contrast has bitten before).
