@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Pyramid — What's Built, What's Coming</title>
+<style>
+  :root{
+    --bg:#0B0E13; --panel:#141821; --panel-2:#1A1F2A; --panel-3:#212734;
+    --line:#262C38; --line-2:#333B4A;
+    --ink:#E8EAED; --ink-2:#A8B0BE; --ink-3:#737C8C;
+    --or:#F97316; --or-dim:#3A1F09; --or-line:#7A3D0F;
+    --gr:#22C55E; --gr-dim:#0E2E19; --gr-line:#1D5233;
+    --bl:#3B82F6; --bl-dim:#0F2244; --bl-line:#1E4380;
+    --soon:#F5A524; --soon-dim:#33260A; --soon-line:#6B4E12;
+    --ui:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--ui);-webkit-font-smoothing:antialiased}
+  .wrap{max-width:1040px;margin:0 auto;padding:34px 22px 70px}
+  header{display:flex;align-items:center;gap:13px;padding-bottom:16px;border-bottom:1px solid var(--line);margin-bottom:8px}
+  .tri{width:0;height:0;border-left:15px solid transparent;border-right:15px solid transparent;border-bottom:26px solid var(--or)}
+  header b{display:block;font-size:15px;letter-spacing:.09em;font-weight:800}
+  header span{display:block;font-size:9.5px;letter-spacing:.13em;color:var(--ink-3);margin-top:2px}
+  h1{font-size:27px;letter-spacing:-.02em;margin:22px 0 5px}
+  .lead{color:var(--ink-3);font-size:14px;margin:0 0 22px;max-width:74ch;line-height:1.55}
+
+  h2{font-size:15px;letter-spacing:.02em;margin:34px 0 12px;padding-bottom:8px;border-bottom:1px solid var(--line)}
+  h2 .sub{font-weight:400;color:var(--ink-3);font-size:12.5px;margin-left:8px}
+
+  /* ---- status pills ---- */
+  .pill{display:inline-block;font-size:9.5px;font-weight:800;letter-spacing:.07em;text-transform:uppercase;
+    padding:2px 8px;border-radius:5px;white-space:nowrap}
+  .pill.live{background:var(--gr-dim);color:#5FD98A;border:1px solid var(--gr-line)}
+  .pill.part{background:var(--soon-dim);color:var(--soon);border:1px dashed var(--soon-line)}
+  .pill.next{background:var(--or-dim);color:#F9A05C;border:1px solid var(--or-line)}
+  .pill.later{background:var(--panel-3);color:var(--ink-3);border:1px solid var(--line-2)}
+
+  /* ---- "working today" grid ---- */
+  .now{display:grid;grid-template-columns:repeat(auto-fit,minmax(228px,1fr));gap:10px}
+  .nowcard{border:1px solid var(--line);border-left:3px solid var(--gr);border-radius:9px;
+    padding:12px 14px;background:var(--panel)}
+  .nowcard h3{margin:0 0 5px;font-size:13px}
+  .nowcard p{margin:0;font-size:11.5px;color:var(--ink-3);line-height:1.5}
+
+  /* ---- phase rows ---- */
+  .ph{border:1px solid var(--line);border-radius:10px;background:var(--panel);margin-bottom:11px;overflow:hidden}
+  .ph.is-next{border-color:var(--or-line)}
+  .phtop{display:flex;align-items:center;gap:11px;padding:13px 15px;background:var(--panel-2);flex-wrap:wrap}
+  .phtop h3{margin:0;font-size:14px;flex:1;min-width:190px}
+  .phbody{padding:13px 15px}
+  .phbody p{margin:0 0 9px;font-size:12.5px;color:var(--ink-2);line-height:1.6}
+  .phbody p:last-child{margin-bottom:0}
+  .unlocks{margin:10px 0 0;padding:10px 13px;background:var(--panel-3);border-radius:7px;
+    font-size:12px;color:var(--ink-2);line-height:1.55}
+  .unlocks b{color:var(--gr)}
+  .waiting{margin:10px 0 0;padding:10px 13px;border-radius:7px;font-size:12px;line-height:1.55;
+    background:var(--soon-dim);border:1px solid var(--soon-line);color:var(--ink-2)}
+  .waiting b{color:var(--soon)}
+
+  /* ---- the billing thread ---- */
+  .thread{margin:0 0 8px;padding:15px 17px;border-radius:9px;background:var(--panel);
+    border:1px solid var(--line);border-left:3px solid var(--or)}
+  .thread p{margin:0 0 9px;font-size:13px;color:var(--ink-2);line-height:1.62}
+  .thread p:last-child{margin-bottom:0}
+  .thread b{color:var(--ink)}
+  .chain{display:flex;align-items:center;gap:9px;flex-wrap:wrap;margin:13px 0 4px}
+  .chain .lnk{padding:6px 11px;border-radius:6px;font-size:11.5px;background:var(--panel-3);
+    border:1px solid var(--line-2);color:var(--ink-2)}
+  .chain .lnk b{display:block;font-size:10px;color:var(--ink-3);font-weight:600;letter-spacing:.04em;text-transform:uppercase}
+  .chain .lnk + .lnk::before{content:'→';color:var(--ink-3);font-size:14px;
+    margin-right:9px;display:inline-block;vertical-align:middle}
+
+  /* ---- ask table ---- */
+  table{width:100%;border-collapse:collapse;font-size:12.5px;margin-top:4px}
+  th,td{text-align:left;padding:10px 13px;border-bottom:1px solid var(--line);vertical-align:top}
+  th{font-size:10px;letter-spacing:.07em;text-transform:uppercase;color:var(--ink-3);font-weight:700}
+  td b{color:var(--ink)}
+  tr:last-child td{border-bottom:none}
+
+  code{font-family:var(--mono);font-size:11.5px;background:var(--panel-3);border:1px solid var(--line-2);
+    padding:1px 5px;border-radius:4px;color:var(--ink-2)}
+
+  footer{margin-top:38px;padding-top:15px;border-top:1px solid var(--line);
+    display:flex;justify-content:space-between;gap:14px;flex-wrap:wrap;font-size:11px;color:var(--ink-3)}
+  footer b{color:var(--or)}
+  a{color:#F9A05C}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header><div class="tri"></div><div><b>PYRAMID</b><span>RESTORATION SPECIALISTS</span></div></header>
+
+  <h1>What's built, and what's coming</h1>
+  <p class="lead">The portal is being built in stages, and each stage leaves it working rather than
+  half-finished. This page says what you can use today, what arrives next, and what each piece
+  actually changes about the working day. The other two guides describe the finished workflow — this
+  is the page that tells you which parts of them are real yet.</p>
+
+  <p class="lead"><b style="color:var(--ink)">No dates here on purpose.</b> The order is settled; the
+  calendar moves with everything else going on. What is listed is the sequence and what each step
+  unlocks.</p>
+
+  <!-- ================= WORKING TODAY ================= -->
+  <h2>Working today <span class="sub">use it now</span></h2>
+  <div class="now">
+    <div class="nowcard"><h3>Clients, buildings and contacts</h3>
+      <p>The full client → building → project drill-down. Office and site contacts, BIN and block/lot
+      on each building, one contact across many buildings.</p></div>
+    <div class="nowcard"><h3>Projects and the 10 stages</h3>
+      <p>Job numbers assigned automatically, one shared sequence for Regular and IRA. Stages advance
+      forward and back, with the award gate on Stage 3.</p></div>
+    <div class="nowcard"><h3>Tasks and assignment</h3>
+      <p>Tasks seeded per stage. Assign to a person, complete your own from My Tasks, in-app
+      notification when something lands on you.</p></div>
+    <div class="nowcard"><h3>SharePoint folders</h3>
+      <p>One folder per job, created with the job number at bid time and never moved. Documents and
+      photos upload into the right subfolder from the project.</p></div>
+    <div class="nowcard"><h3>Tool Control</h3>
+      <p>Scan a QR tag, check tools out and in, see who has what. Maintenance, tags and reports for
+      the tool crib; catalog changes for tool admins.</p></div>
+    <div class="nowcard"><h3>Roles and access</h3>
+      <p>Jorge's eight roles plus the Tool and Billing add-ons, self-serve on the Team screen. What
+      each role can do now matches the permission matrix.</p></div>
+  </div>
+
+  <!-- ================= THE BILLING THREAD ================= -->
+  <h2>The one that matters most <span class="sub">why the next two steps are the next two steps</span></h2>
+  <div class="thread">
+    <p><b>The goal: no more weekly meeting to find out who owes what.</b> Billing exports the A/R
+    report from QuickBooks, uploads it, and every job in the portal shows what it has been invoiced,
+    what has been paid, and how far behind it is — visible to the PM on that job without anyone
+    being asked. Collections works from a list that is already right.</p>
+
+    <p>That needs two things in order, and the order is not negotiable: the portal has to know
+    <b>which QuickBooks job is which project</b> before an uploaded invoice can be matched to
+    anything. That link is what the billing queue creates.</p>
+
+    <div class="chain">
+      <span class="lnk"><b>Step 1</b>Billing queue — the job gets its QuickBooks name recorded</span>
+      <span class="lnk"><b>Step 2</b>Upload the A/R export — invoices match themselves to jobs</span>
+      <span class="lnk"><b>Result</b>Money owed visible per job, routed to the right PM</span>
+    </div>
+
+    <p style="margin-top:11px">This is also why three steps in the <a href="/guides/runbook.html">Billing
+    runbook</a> are badged <span class="pill part">Not built yet</span> — they are the two steps above,
+    written down in advance so the process is ready the day the screens are.</p>
+  </div>
+
+  <!-- ================= WHAT'S NEXT ================= -->
+  <h2>What's coming, in order</h2>
+
+  <div class="ph is-next">
+    <div class="phtop"><h3>Billing queue and the QuickBooks handoff</h3><span class="pill next">Next</span></div>
+    <div class="phbody">
+      <p>When a bid is won, the job appears in a Billing queue on its own — nobody has to remember to
+      tell Billing. The card carries the client, building, contract amount, who to bill, the PM and
+      Rep, and a link straight to the bid document. It suggests the QuickBooks job name; Billing
+      creates the job, pastes the real path back, and the two systems are linked from then on.</p>
+      <div class="unlocks"><b>What changes:</b> Billing stops hunting through server folders for bid
+      documents, and the same client's jobs stop getting named three different ways in QuickBooks.</div>
+    </div>
+  </div>
+
+  <div class="ph">
+    <div class="phtop"><h3>A/R import and money visibility</h3><span class="pill next">After that</span></div>
+    <div class="phbody">
+      <p>Billing runs the memorized A/R report in QuickBooks, exports it to Excel or CSV, and uploads
+      it — about two minutes, weekly. Each invoice matches itself to its job. Anything that doesn't
+      match lands in a short review list rather than disappearing. Aging uses QuickBooks' own
+      30/60/90 buckets, and the Rep on each invoice routes it to that PM's view.</p>
+      <div class="unlocks"><b>What changes:</b> the weekly billing meeting stops being how the company
+      finds out where the money is. QuickBooks stays the source of truth for dollars — the portal just
+      shows what it already knows, to the people who need it.</div>
+      <div class="waiting"><b>Needs two things from Pyramid, not from code:</b> the
+      <code>PORTAL – A/R Aging Detail</code> report memorized in QuickBooks by Finance, and one sample
+      export from it so the reader is built against the real file. Both can happen now — they do not
+      have to wait for the billing queue.</div>
+    </div>
+  </div>
+
+  <div class="ph">
+    <div class="phtop"><h3>Bids workspace, scope and win/loss</h3><span class="pill part">Partly built</span></div>
+    <div class="phbody">
+      <p>Job numbering, the permanent folder and the award handoff already work. What's still to come
+      is the bidding crew getting their own workspace separate from production, itemised scope on a
+      job, and marking a bid lost with a reason so win rates can be reported by client and estimator.</p>
+      <div class="unlocks"><b>What changes:</b> estimators stop sharing a view with production, and
+      lost bids become data instead of disappearing.</div>
+    </div>
+  </div>
+
+  <div class="ph">
+    <div class="phtop"><h3>Permits, insurance and expiry alerts</h3><span class="pill later">Later</span></div>
+    <div class="phbody">
+      <p>Permits and insurance tracked as records rather than filenames, sorted by what expires
+      first, with reminders at 90, 60 and 30 days. Expiry dates get read off an uploaded COI or permit
+      automatically — but a person always confirms the date before it saves. Today these exist only as
+      SharePoint folders on a job.</p>
+      <div class="unlocks"><b>What changes:</b> an expiring DOB permit or COI surfaces before it
+      lapses instead of after.</div>
+    </div>
+  </div>
+
+  <div class="ph">
+    <div class="phtop"><h3>Documents — drag-drop and editing in place</h3><span class="pill later">Later</span></div>
+    <div class="phbody">
+      <p>Drag several files at once with a destination picker, attach documents to individual tasks,
+      and open Word or Excel files in the browser with changes saving back to SharePoint. Uploading
+      already works — this is convenience on top of it.</p>
+      <div class="unlocks"><b>What changes:</b> fewer trips through the folder tree. This one is the
+      most movable in the list — it can come forward if the office wants it sooner.</div>
+    </div>
+  </div>
+
+  <!-- ================= WHAT WE NEED ================= -->
+  <h2>What's needed from Pyramid</h2>
+  <p class="lead" style="margin-bottom:10px">Two of these gate the billing work. None of them is
+  waiting on code.</p>
+  <table>
+    <tr><th style="width:34%">What</th><th style="width:22%">Who</th><th>Why it matters</th></tr>
+    <tr>
+      <td><b>Memorize the A/R report</b><br><code>PORTAL – A/R Aging Detail</code></td>
+      <td>Finance / Noemi</td>
+      <td>The weekly upload reads this exact report. Memorizing it once fixes the format so the
+      reader keeps working every week.</td>
+    </tr>
+    <tr>
+      <td><b>One sample export</b> from that report</td>
+      <td>Finance / Noemi</td>
+      <td>The reader is built against a real file rather than a guess. The July export covers most
+      of it; one more after the report is memorized confirms the format is stable.</td>
+    </tr>
+    <tr>
+      <td><b>Read the Billing runbook</b> and walk one live job through it</td>
+      <td>Noemi, backup Nina</td>
+      <td>The naming convention is the whole basis of invoice matching. Getting it right on one real
+      job before the queue ships is worth more than reading it twice.</td>
+    </tr>
+    <tr>
+      <td><b>Confirm the 10 stages</b> read correctly</td>
+      <td>Jorge, Omar</td>
+      <td>Stages drive which tasks appear on a job. Worth confirming before staff rely on them daily.</td>
+    </tr>
+  </table>
+
+  <footer>
+    <div><b>Kane PC</b> — Managed IT &amp; Custom Application Development</div>
+    <div>Pyramid Restoration Staff Portal · what's built, what's coming</div>
+  </footer>
+</div>
+</body>
+</html>

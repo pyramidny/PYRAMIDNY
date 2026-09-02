@@ -9,14 +9,26 @@
 // buys today. If they ever need to live inside the app chrome (search, in-page
 // linking, light theme), that is the point to convert them.
 //
-// Both currently describe parts of the workflow that are not built yet — the
-// billing queue, A/R import and the Bids workspace, phases 3-5 of the
-// development plan. Each guide carries a banner saying so and badges the
-// affected steps. Remove those as the phases ship.
+// joblife and runbook describe parts of the workflow that are not built yet —
+// the billing queue, A/R import and the Bids workspace. Each carries a banner
+// saying so and badges the affected steps; remove those as the phases ship.
+// roadmap.html is the page that says which those are and what comes when, so
+// it is listed first and is the only one without the "unbuilt steps" flag.
 
-import { BookOpen, ExternalLink, HardHat, Receipt } from 'lucide-react'
+import { BookOpen, ExternalLink, HardHat, Map, Receipt } from 'lucide-react'
 
 const GUIDES = [
+  {
+    href: '/guides/roadmap.html',
+    icon: Map,
+    title: "What's built, and what's coming",
+    blurb:
+      'Which parts of the portal you can use today, what arrives next, and what each step ' +
+      'actually changes about the working day. Read this one first if a step in another guide ' +
+      'is marked as not built yet.',
+    audience: 'Everyone',
+    partial: false,
+  },
   {
     href: '/guides/joblife.html',
     icon: HardHat,
